@@ -30,6 +30,13 @@ Money-out tools to guard: `create_refund`, `accept_dispute_claim`, `cancel_sent_
 
 TypeScript, Node.js, the official MCP TypeScript SDK (Handrail is an MCP server toward the agent and an MCP client toward PayPal), SQLite, React, and AG Grid. Hosted on Render. One repo.
 
+## Verified facts (Oct 2026)
+
+- PayPal's sandbox MCP server only works over **SSE** at `https://mcp.sandbox.paypal.com/sse` (46 tools). The documented Streamable HTTP path `/http`, and `/mcp`, return 404 even with a valid token. `npm run probe` re-checks this.
+- The bearer token for the MCP server is a normal REST access token from `/v1/oauth2/token` (client credentials).
+- SQLite uses Node's built-in `node:sqlite` (Node >= 22.13). `better-sqlite3` segfaulted on Node 23.4. Scripts pass `--disable-warning=ExperimentalWarning`.
+- `npm run smoke` is the end-to-end check: starts Handrail over stdio, lists tools, makes one read-only call.
+
 ## Auth
 
 Handrail holds `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` and gets access tokens itself via the OAuth client-credentials flow, refreshing before expiry (tokens last roughly 9 hours). The agent never sees PayPal credentials. Secrets stay in `.env`, server side only.
