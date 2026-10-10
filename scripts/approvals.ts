@@ -44,7 +44,13 @@ if (!command) {
   }
 } else if ((command === "approve" || command === "reject") && id) {
   const a = await api("POST", `/approvals/${id}/${command}`, { by: userInfo().username, note });
-  console.log(`${a.id} is now ${a.status}`);
+  const outcome: Record<string, string> = {
+    executed: "approved and forwarded to PayPal, which accepted it",
+    failed: "approved and forwarded to PayPal, which returned an error (below)",
+    blocked: "approved, but policy now blocks it (e.g. a limit was used up), so it was not forwarded",
+    rejected: "rejected; it will not reach PayPal",
+  };
+  console.log(`${a.id}: ${outcome[a.status] ?? a.status}`);
   if (a.result) console.log(JSON.stringify(a.result, null, 2).slice(0, 2000));
 } else {
   console.error("Usage: npm run approvals [-- approve|reject <id> [note]]");
