@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { AuditChain } from "./audit-chain.js";
 import type { Outcome } from "./idempotency.js";
 import type { CallFacts, Evaluation, HistoryEntry } from "./policy/types.js";
 
@@ -28,11 +29,15 @@ export interface CallRow {
 
 /**
  * One row per tool call the agent makes: what it asked for, what Handrail
- * decided and why, and what PayPal returned. The hash-chained audit log from
- * the design replaces this in a later step.
+ * decided and why, and what PayPal returned.
+ * Every write also appends to the tamper-evident audit chain (audit-chain.ts),
+ * in the same transaction; this table is the convenient, queryable view.
  */
 export class CallLog {
-  constructor(private readonly db: DatabaseSync) {
+  constructor(
+    private readonly db: DatabaseSync,
+    private readonly chain = new AuditChain(db),
+  ) {
     migrateStep1Table(db);
     db.exec(`
       CREATE TABLE IF NOT EXISTS tool_calls (
@@ -68,52 +73,81 @@ export class CallLog {
     evaluation: Evaluation,
     opts: { forwarded: boolean; approvalId?: string; operationKey?: string; requestId?: string; now: number },
   ): number {
-    const result = this.db
-      .prepare(
-        `INSERT INTO tool_calls (created_at, at_ms, tool, args_json, decision, reason, hits_json,
-           amount_hundredths, currency, amount_source, forwarded, approval_id, operation_key, request_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        new Date(opts.now).toISOString(),
-        opts.now,
-        facts.tool,
-        JSON.stringify(facts.args),
-        evaluation.decision,
-        evaluation.reason,
-        JSON.stringify(evaluation.hits),
-        facts.amount?.hundredths ?? null,
-        facts.amount?.currency ?? null,
-        facts.amountSource,
-        opts.forwarded ? 1 : 0,
-        opts.approvalId ?? null,
-        opts.operationKey ?? null,
-        opts.requestId ?? null,
-      );
-    return Number(result.lastInsertRowid);
+    return this.chain.record(opts.now, () => {
+      const result = this.db
+        .prepare(
+          `INSERT INTO tool_calls (created_at, at_ms, tool, args_json, decision, reason, hits_json,
+             amount_hundredths, currency, amount_source, forwarded, approval_id, operation_key, request_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          new Date(opts.now).toISOString(),
+          opts.now,
+          facts.tool,
+          JSON.stringify(facts.args),
+          evaluation.decision,
+          evaluation.reason,
+          JSON.stringify(evaluation.hits),
+          facts.amount?.hundredths ?? null,
+          facts.amount?.currency ?? null,
+          facts.amountSource,
+          opts.forwarded ? 1 : 0,
+          opts.approvalId ?? null,
+          opts.operationKey ?? null,
+          opts.requestId ?? null,
+        );
+      const id = Number(result.lastInsertRowid);
+      const entry = {
+        kind: "call.decided" as const,
+        ref: `call:${id}`,
+        data: {
+          tool: facts.tool,
+          args: facts.args,
+          decision: evaluation.decision,
+          reason: evaluation.reason,
+          rules: evaluation.hits,
+          amount: facts.amount,
+          amountSource: facts.amountSource,
+          payee: facts.payee,
+          forwarded: opts.forwarded,
+          approvalId: opts.approvalId ?? null,
+          operationKey: opts.operationKey ?? null,
+          requestId: opts.requestId ?? null,
+        },
+      };
+      return { value: id, entries: [entry] };
+    });
   }
 
   /** Records a repeat of a live operation that was answered without contacting PayPal. */
   recordDuplicate(tool: string, args: Record<string, unknown>, operationKey: string, now: number): number {
-    const result = this.db
-      .prepare(
-        `INSERT INTO tool_calls (created_at, at_ms, tool, args_json, decision, reason, hits_json,
-           amount_source, forwarded, operation_key, outcome, is_error, duration_ms)
-         VALUES (?, ?, ?, ?, 'duplicate', 'Repeat of an earlier identical call; not sent to PayPal again', '[]', 'none', 0, ?, 'duplicate', 0, 0)`,
-      )
-      .run(new Date(now).toISOString(), now, tool, JSON.stringify(args), operationKey);
-    return Number(result.lastInsertRowid);
+    return this.chain.record(now, () => {
+      const result = this.db
+        .prepare(
+          `INSERT INTO tool_calls (created_at, at_ms, tool, args_json, decision, reason, hits_json,
+             amount_source, forwarded, operation_key, outcome, is_error, duration_ms)
+           VALUES (?, ?, ?, ?, 'duplicate', 'Repeat of an earlier identical call; not sent to PayPal again', '[]', 'none', 0, ?, 'duplicate', 0, 0)`,
+        )
+        .run(new Date(now).toISOString(), now, tool, JSON.stringify(args), operationKey);
+      const id = Number(result.lastInsertRowid);
+      const data = { tool, args, decision: "duplicate", amount: null, forwarded: false, operationKey, outcome: "duplicate" };
+      return { value: id, entries: [{ kind: "call.duplicate" as const, ref: `call:${id}`, data }] };
+    });
   }
 
   /**
    * Stores the result. Unknown outcomes are not marked as errors, so they keep
    * counting toward spend limits: the money may have moved.
    */
-  finish(id: number, result: unknown, outcome: CallOutcome, durationMs: number): void {
+  finish(id: number, result: unknown, outcome: CallOutcome, durationMs: number, now = Date.now()): void {
     const isError = outcome === "failed" || outcome === "blocked";
-    this.db
-      .prepare(`UPDATE tool_calls SET result_json = ?, is_error = ?, outcome = ?, duration_ms = ? WHERE id = ?`)
-      .run(JSON.stringify(result ?? null), isError ? 1 : 0, outcome, Math.round(durationMs), id);
+    this.chain.record(now, () => {
+      this.db
+        .prepare(`UPDATE tool_calls SET result_json = ?, is_error = ?, outcome = ?, duration_ms = ? WHERE id = ?`)
+        .run(JSON.stringify(result ?? null), isError ? 1 : 0, outcome, Math.round(durationMs), id);
+      const data = { outcome, result: result ?? null, durationMs: Math.round(durationMs) };
+      return { value: undefined, entries: [{ kind: "call.finished" as const, ref: `call:${id}`, data }] };
+    });
   }
 
   /**

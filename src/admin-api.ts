@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Approval, ApprovalStatus } from "./approvals.js";
+import type { AuditChain } from "./audit-chain.js";
 import type { CallLog } from "./audit.js";
 import { DecisionError, type Gate } from "./gate.js";
 import type { Policy } from "./policy/types.js";
@@ -10,6 +11,7 @@ export interface AdminDeps {
   gate: Gate;
   callLog: CallLog;
   webhooks: WebhookStore;
+  audit: AuditChain;
   policy: () => Policy;
   /** Bearer token required on every /api request. Unset disables the API. */
   adminToken: string | undefined;
@@ -68,6 +70,8 @@ function present(a: Approval) {
  *   POST /api/approvals/:id/reject    { "by": "name", "note": "..." }
  *   GET  /api/calls?limit=50
  *   GET  /api/webhooks?status=mismatch
+ *   GET  /api/audit?limit=100&ref=call:12   (newest first)
+ *   GET  /api/audit/verify
  *   GET  /api/policy
  */
 export async function handleAdmin(req: IncomingMessage, res: ServerResponse, deps: AdminDeps): Promise<boolean> {
@@ -106,6 +110,12 @@ export async function handleAdmin(req: IncomingMessage, res: ServerResponse, dep
       const status = (url.searchParams.get("status") as MatchStatus | null) ?? undefined;
       const events = deps.webhooks.list(status).map(({ reasons_json, ...e }) => ({ ...e, reasons: JSON.parse(reasons_json) }));
       send(res, 200, events);
+    } else if (req.method === "GET" && parts[1] === "audit" && parts.length === 2) {
+      const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 100, 1), 1000);
+      const rows = deps.audit.list(limit, url.searchParams.get("ref") ?? undefined);
+      send(res, 200, rows.map(({ data_json, ...r }) => ({ ...r, data: JSON.parse(data_json) })));
+    } else if (req.method === "GET" && parts[1] === "audit" && parts[2] === "verify" && parts.length === 3) {
+      send(res, 200, deps.audit.verify());
     } else if (req.method === "GET" && parts[1] === "policy" && parts.length === 2) {
       send(res, 200, deps.policy());
     } else {

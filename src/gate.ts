@@ -136,12 +136,12 @@ export class Gate {
         },
         true,
       );
-      this.deps.callLog.finish(callId, result, "blocked", 0);
+      this.deps.callLog.finish(callId, result, "blocked", 0, this.now());
       return result;
     }
 
     const held = approval!;
-    this.deps.callLog.finish(callId, { handrail: { status: "pending_approval", approval_id: held.id } }, "held", 0);
+    this.deps.callLog.finish(callId, { handrail: { status: "pending_approval", approval_id: held.id } }, "held", 0, this.now());
     return this.approvalResult(await this.waitForFinal(held.id, this.options.approvalWaitMs));
   }
 
@@ -161,7 +161,7 @@ export class Gate {
     const evaluation = this.evaluate(approval.facts, now, true);
     if (evaluation.decision !== "allow") {
       const result = handrailResult({ status: "blocked", tool: approval.tool, reason: evaluation.reason, approval_id: id }, true);
-      this.deps.approvals.complete(id, "blocked", result);
+      this.deps.approvals.complete(id, "blocked", result, this.now());
       if (operation) this.finishOperation(operation, "abandoned", result);
       log(`${approval.tool} approval ${id} by ${by} -> blocked at execution: ${evaluation.reason}`);
       return this.settle(id);
@@ -177,7 +177,7 @@ export class Gate {
     });
     log(`${approval.tool} approval ${id} approved by ${by}; forwarding`);
     const result = await this.forward(callId, approval.tool, approval.args, operation);
-    this.deps.approvals.complete(id, classifyOutcome(result, false) === "succeeded" ? "executed" : "failed", result);
+    this.deps.approvals.complete(id, classifyOutcome(result, false) === "succeeded" ? "executed" : "failed", result, this.now());
     return this.settle(id);
   }
 
@@ -259,7 +259,7 @@ export class Gate {
     const durationMs = performance.now() - started;
     const outcome = classifyOutcome(result, threw);
 
-    this.deps.callLog.finish(callId, result, outcome, durationMs);
+    this.deps.callLog.finish(callId, result, outcome, durationMs, this.now());
     if (operation) this.finishOperation(operation, outcome, result);
     log(`${tool} ${direct ? `sent directly (PayPal-Request-Id ${operation!.requestId})` : "forwarded"}: ${outcome} ${Math.round(durationMs)}ms`);
     return result;
@@ -386,6 +386,7 @@ export class Gate {
         approval.id,
         "failed",
         unknownOutcomeResult(approval.tool, new Error("Handrail restarted while this call was being sent"), DIRECT_TOOLS.has(approval.tool)),
+        now,
       );
     }
     if (interrupted > 0) log(`Marked ${interrupted} interrupted operation(s) as outcome unknown`);

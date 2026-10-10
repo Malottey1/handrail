@@ -4,6 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { authorized, handleAdmin } from "./admin-api.js";
 import { ApprovalStore } from "./approvals.js";
+import { AuditChain } from "./audit-chain.js";
 import { CallLog } from "./audit.js";
 import { loadConfig } from "./config.js";
 import { Gate } from "./gate.js";
@@ -39,17 +40,21 @@ async function main(): Promise<void> {
 
   const db = new DatabaseSync(config.dbPath);
   db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
-  const callLog = new CallLog(db);
+  const audit = new AuditChain(db);
+  const callLog = new CallLog(db, audit);
   const rest = new PayPalRest(config.paypalBaseUrl, tokens);
-  const webhooks = new WebhookStore(db);
+  const webhooks = new WebhookStore(db, audit);
+  const approvals = new ApprovalStore(db, audit);
+  const operations = new OperationStore(db, config.idempotencyWindowMs);
+  audit.start(Date.now());
   const gate = new Gate(
     {
       upstream,
       rest,
       direct: new PayPalDirect(config.paypalBaseUrl, tokens),
       callLog,
-      approvals: new ApprovalStore(db),
-      operations: new OperationStore(db, config.idempotencyWindowMs),
+      approvals,
+      operations,
       policy: () => policy,
     },
     { approvalWaitMs: config.approvalWaitMs, approvalTtlMs: config.approvalTtlMs },
@@ -78,7 +83,7 @@ async function main(): Promise<void> {
       });
       return;
     }
-    if (await handleAdmin(req, res, { gate, callLog, webhooks, policy: () => policy, adminToken: config.adminToken })) {
+    if (await handleAdmin(req, res, { gate, callLog, webhooks, audit, policy: () => policy, adminToken: config.adminToken })) {
       return;
     }
     if (stdio || path !== "/mcp") {

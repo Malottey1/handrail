@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { AuditChain, sha256 } from "./audit-chain.js";
 import type { CallOutcome, CallRow } from "./audit.js";
 import { formatMoney, toHundredths, type Money } from "./policy/money.js";
 
@@ -179,7 +180,10 @@ export interface StoredEvent {
 }
 
 export class WebhookStore {
-  constructor(private readonly db: DatabaseSync) {
+  constructor(
+    private readonly db: DatabaseSync,
+    private readonly chain = new AuditChain(db),
+  ) {
     db.exec(`
       CREATE TABLE IF NOT EXISTS webhook_events (
         event_id     TEXT    PRIMARY KEY,
@@ -201,28 +205,43 @@ export class WebhookStore {
     return this.db.prepare(`SELECT 1 FROM webhook_events WHERE event_id = ?`).get(eventId) !== undefined;
   }
 
-  /** Stores an event once; PayPal redelivers events, and repeats are ignored. */
+  /**
+   * Stores an event once; PayPal redelivers events, and repeats are ignored.
+   * The audit entry carries a hash of the raw body, so edits to it are detectable.
+   */
   insert(event: WebhookEvent, verified: boolean, match: MatchResult, raw: string, now: number): boolean {
-    const result = this.db
-      .prepare(
-        `INSERT OR IGNORE INTO webhook_events
-           (event_id, received_at, event_type, summary, resource_id, verified, status, tool, call_id, reasons_json, raw_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        event.id,
-        new Date(now).toISOString(),
-        event.event_type,
-        event.summary ?? null,
-        match.resourceId,
-        verified ? 1 : 0,
-        match.status,
-        match.tool,
-        match.callId,
-        JSON.stringify(match.reasons),
-        raw,
-      );
-    return result.changes === 1;
+    return this.chain.record(now, () => {
+      const inserted =
+        this.db
+          .prepare(
+            `INSERT OR IGNORE INTO webhook_events
+               (event_id, received_at, event_type, summary, resource_id, verified, status, tool, call_id, reasons_json, raw_json)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            event.id,
+            new Date(now).toISOString(),
+            event.event_type,
+            event.summary ?? null,
+            match.resourceId,
+            verified ? 1 : 0,
+            match.status,
+            match.tool,
+            match.callId,
+            JSON.stringify(match.reasons),
+            raw,
+          ).changes === 1;
+      const data = {
+        eventType: event.event_type,
+        resourceId: match.resourceId,
+        verified,
+        status: match.status,
+        callId: match.callId,
+        reasons: match.reasons,
+        rawSha256: sha256(raw),
+      };
+      return { value: inserted, entries: inserted ? [{ kind: "webhook.received" as const, ref: `webhook:${event.id}`, data }] : [] };
+    });
   }
 
   list(status?: MatchStatus, limit = 100): StoredEvent[] {

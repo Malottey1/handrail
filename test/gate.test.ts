@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { ApprovalStore } from "../src/approvals.js";
+import { AuditChain } from "../src/audit-chain.js";
 import { CallLog } from "../src/audit.js";
 import { DecisionError, Gate } from "../src/gate.js";
 import { canonicalJson, classifyOutcome, OperationStore, operationKey } from "../src/idempotency.js";
@@ -391,5 +392,33 @@ describe("idempotency helpers", () => {
     assert.equal(classifyOutcome({ content: [], isError: true }, false), "failed");
     assert.equal(classifyOutcome({ content: [] }, true), "unknown");
     assert.equal(classifyOutcome({ content: [{ type: "text", text: "plain" }] }, false), "succeeded");
+  });
+});
+
+describe("audit chain through the gate", () => {
+  it("every path (allow, duplicate, hold+approve, block, hold+reject, expire) leaves a verifiable chain", async () => {
+    const { gate, advance, db } = setup();
+    const refund = (value: string, key: string) =>
+      gate.handle("create_refund", { capture_id: "CAP1", amount: { currency_code: "USD", value }, idempotency_key: key });
+
+    await refund("10.00", "a");
+    await refund("10.00", "a"); // duplicate
+    await refund("150.00", "b");
+    const [first] = gate.listApprovals("pending");
+    await gate.approve(first!.id, "alice", null);
+    await refund("5000.00", "c"); // blocked
+    await refund("200.00", "d");
+    gate.reject(gate.listApprovals("pending")[0]!.id, "bob", "no");
+    await refund("300.00", "e");
+    advance(61 * MINUTE);
+    await refund("1.00", "f"); // triggers expiry of "e"
+
+    const chain = new AuditChain(db);
+    const result = chain.verify();
+    assert.deepEqual(result.problems, []);
+    const kinds = new Set(chain.list(1000).map((e) => e.kind));
+    for (const kind of ["call.decided", "call.duplicate", "call.finished", "approval.created", "approval.decided", "approval.completed", "approval.expired"]) {
+      assert.ok(kinds.has(kind as never), `missing ${kind}`);
+    }
   });
 });

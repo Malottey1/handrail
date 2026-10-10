@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import { AuditChain } from "./audit-chain.js";
 import type { CallFacts, Evaluation } from "./policy/types.js";
 
 /**
@@ -44,8 +45,12 @@ interface ApprovalRow {
   result_json: string | null;
 }
 
+/** Every change is also appended to the audit chain, in the same transaction. */
 export class ApprovalStore {
-  constructor(private readonly db: DatabaseSync) {
+  constructor(
+    private readonly db: DatabaseSync,
+    private readonly chain = new AuditChain(db),
+  ) {
     db.exec(`
       CREATE TABLE IF NOT EXISTS approvals (
         id              TEXT    PRIMARY KEY,
@@ -66,12 +71,16 @@ export class ApprovalStore {
 
   create(facts: CallFacts, evaluation: Evaluation, now: number, ttlMs: number): Approval {
     const id = `apr_${randomUUID().replaceAll("-", "").slice(0, 20)}`;
-    this.db
-      .prepare(
-        `INSERT INTO approvals (id, created_at, expires_at, tool, facts_json, evaluation_json, status)
-         VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
-      )
-      .run(id, now, now + ttlMs, facts.tool, JSON.stringify(facts), JSON.stringify(evaluation));
+    this.chain.record(now, () => {
+      this.db
+        .prepare(
+          `INSERT INTO approvals (id, created_at, expires_at, tool, facts_json, evaluation_json, status)
+           VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
+        )
+        .run(id, now, now + ttlMs, facts.tool, JSON.stringify(facts), JSON.stringify(evaluation));
+      const data = { tool: facts.tool, facts, evaluation, status: "pending", expiresAt: new Date(now + ttlMs).toISOString() };
+      return { value: undefined, entries: [{ kind: "approval.created" as const, ref: `approval:${id}`, data }] };
+    });
     return this.get(id)!;
   }
 
@@ -93,29 +102,41 @@ export class ApprovalStore {
    * clicks on Approve can never execute a call twice.
    */
   decide(id: string, to: "executing" | "rejected", by: string, note: string | null, now: number): boolean {
-    const result = this.db
-      .prepare(
-        `UPDATE approvals SET status = ?, decided_at = ?, decided_by = ?, note = ?
-         WHERE id = ? AND status = 'pending' AND expires_at > ?`,
-      )
-      .run(to, now, by, note, id, now);
-    return result.changes === 1;
+    return this.chain.record(now, () => {
+      const changed =
+        this.db
+          .prepare(
+            `UPDATE approvals SET status = ?, decided_at = ?, decided_by = ?, note = ?
+             WHERE id = ? AND status = 'pending' AND expires_at > ?`,
+          )
+          .run(to, now, by, note, id, now).changes === 1;
+      const data = { status: to, decidedBy: by, note, decision: to === "executing" ? "approved" : "rejected" };
+      return { value: changed, entries: changed ? [{ kind: "approval.decided" as const, ref: `approval:${id}`, data }] : [] };
+    });
   }
 
   /** Records the outcome of an approved call. */
-  complete(id: string, status: "executed" | "failed" | "blocked", result: unknown): void {
-    this.db.prepare(`UPDATE approvals SET status = ?, result_json = ? WHERE id = ?`).run(status, JSON.stringify(result ?? null), id);
+  complete(id: string, status: "executed" | "failed" | "blocked", result: unknown, now = Date.now()): void {
+    this.chain.record(now, () => {
+      this.db.prepare(`UPDATE approvals SET status = ?, result_json = ? WHERE id = ?`).run(status, JSON.stringify(result ?? null), id);
+      const data = { status, result: result ?? null };
+      return { value: undefined, entries: [{ kind: "approval.completed" as const, ref: `approval:${id}`, data }] };
+    });
   }
 
   /** Marks overdue pending approvals expired. Returns the ids it expired. */
   expireOverdue(now: number): string[] {
-    const rows = this.db
-      .prepare(`SELECT id FROM approvals WHERE status = 'pending' AND expires_at <= ?`)
-      .all(now) as Array<{ id: string }>;
-    if (rows.length > 0) {
+    // Cheap check first: this runs on every call, and most of the time there's nothing to expire.
+    const overdue = this.db.prepare(`SELECT 1 FROM approvals WHERE status = 'pending' AND expires_at <= ? LIMIT 1`).get(now);
+    if (!overdue) return [];
+    return this.chain.record(now, () => {
+      const ids = (
+        this.db.prepare(`SELECT id FROM approvals WHERE status = 'pending' AND expires_at <= ?`).all(now) as Array<{ id: string }>
+      ).map((r) => r.id);
       this.db.prepare(`UPDATE approvals SET status = 'expired', decided_at = ? WHERE status = 'pending' AND expires_at <= ?`).run(now, now);
-    }
-    return rows.map((r) => r.id);
+      const entries = ids.map((id) => ({ kind: "approval.expired" as const, ref: `approval:${id}`, data: { status: "expired" } }));
+      return { value: ids, entries };
+    });
   }
 }
 
