@@ -47,6 +47,7 @@ TypeScript, Node.js, the official MCP TypeScript SDK (Handrail is an MCP server 
 - `npm test`: unit tests (policy engine and gate; no network).
 - `npm run smoke`: starts Handrail over stdio, lists tools, makes one read-only call.
 - `npm run demo:approval [-- --auto]`: end-to-end allow / hold+approve / block / hold+reject against the sandbox, using a fake capture ID so no money moves.
+- `npm run sandbox:capture [-- --amount 20.00]`: creates a real sandbox order, waits for buyer approval in the browser, captures it through Handrail, prints the capture ID.
 - `npm run demo:retry-storm [-- --capture <id> --amount 5.00 --count 10]`: identical refunds fired at once; PayPal receives one.
 - `npm run approvals [-- approve|reject <id> [note]]`: decide held calls via the admin API.
 - `npm run probe`: re-checks which PayPal MCP endpoints work.
