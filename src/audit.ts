@@ -1,5 +1,9 @@
 import type { DatabaseSync } from "node:sqlite";
+import type { Outcome } from "./idempotency.js";
 import type { CallFacts, Evaluation, HistoryEntry } from "./policy/types.js";
+
+/** What happened to a call: PayPal's outcome if forwarded, otherwise why not. */
+export type CallOutcome = Outcome | "blocked" | "held" | "duplicate";
 
 export interface CallRow {
   id: number;
@@ -17,6 +21,9 @@ export interface CallRow {
   result_json: string | null;
   is_error: number | null;
   duration_ms: number | null;
+  operation_key: string | null;
+  request_id: string | null;
+  outcome: CallOutcome | null;
 }
 
 /**
@@ -48,6 +55,7 @@ export class CallLog {
       );
       CREATE INDEX IF NOT EXISTS tool_calls_history ON tool_calls (forwarded, at_ms);
     `);
+    addColumns(db, { operation_key: "TEXT", request_id: "TEXT", outcome: "TEXT" });
   }
 
   /**
@@ -55,12 +63,16 @@ export class CallLog {
    * inserting the row happen with no await in between, so concurrent calls
    * can't both slip under a rate or spend limit.
    */
-  begin(facts: CallFacts, evaluation: Evaluation, opts: { forwarded: boolean; approvalId?: string; now: number }): number {
+  begin(
+    facts: CallFacts,
+    evaluation: Evaluation,
+    opts: { forwarded: boolean; approvalId?: string; operationKey?: string; requestId?: string; now: number },
+  ): number {
     const result = this.db
       .prepare(
         `INSERT INTO tool_calls (created_at, at_ms, tool, args_json, decision, reason, hits_json,
-           amount_hundredths, currency, amount_source, forwarded, approval_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           amount_hundredths, currency, amount_source, forwarded, approval_id, operation_key, request_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         new Date(opts.now).toISOString(),
@@ -75,14 +87,33 @@ export class CallLog {
         facts.amountSource,
         opts.forwarded ? 1 : 0,
         opts.approvalId ?? null,
+        opts.operationKey ?? null,
+        opts.requestId ?? null,
       );
     return Number(result.lastInsertRowid);
   }
 
-  finish(id: number, result: unknown, isError: boolean, durationMs: number): void {
+  /** Records a repeat of a live operation that was answered without contacting PayPal. */
+  recordDuplicate(tool: string, args: Record<string, unknown>, operationKey: string, now: number): number {
+    const result = this.db
+      .prepare(
+        `INSERT INTO tool_calls (created_at, at_ms, tool, args_json, decision, reason, hits_json,
+           amount_source, forwarded, operation_key, outcome, is_error, duration_ms)
+         VALUES (?, ?, ?, ?, 'duplicate', 'Repeat of an earlier identical call; not sent to PayPal again', '[]', 'none', 0, ?, 'duplicate', 0, 0)`,
+      )
+      .run(new Date(now).toISOString(), now, tool, JSON.stringify(args), operationKey);
+    return Number(result.lastInsertRowid);
+  }
+
+  /**
+   * Stores the result. Unknown outcomes are not marked as errors, so they keep
+   * counting toward spend limits: the money may have moved.
+   */
+  finish(id: number, result: unknown, outcome: CallOutcome, durationMs: number): void {
+    const isError = outcome === "failed" || outcome === "blocked";
     this.db
-      .prepare(`UPDATE tool_calls SET result_json = ?, is_error = ?, duration_ms = ? WHERE id = ?`)
-      .run(JSON.stringify(result ?? null), isError ? 1 : 0, Math.round(durationMs), id);
+      .prepare(`UPDATE tool_calls SET result_json = ?, is_error = ?, outcome = ?, duration_ms = ? WHERE id = ?`)
+      .run(JSON.stringify(result ?? null), isError ? 1 : 0, outcome, Math.round(durationMs), id);
   }
 
   /**
@@ -105,6 +136,13 @@ export class CallLog {
 
   recent(limit: number): CallRow[] {
     return this.db.prepare(`SELECT * FROM tool_calls ORDER BY id DESC LIMIT ?`).all(limit) as unknown as CallRow[];
+  }
+}
+
+function addColumns(db: DatabaseSync, columns: Record<string, string>): void {
+  const existing = new Set((db.prepare(`PRAGMA table_info(tool_calls)`).all() as Array<{ name: string }>).map((c) => c.name));
+  for (const [name, type] of Object.entries(columns)) {
+    if (!existing.has(name)) db.exec(`ALTER TABLE tool_calls ADD COLUMN ${name} ${type}`);
   }
 }
 

@@ -7,8 +7,10 @@ import { ApprovalStore } from "./approvals.js";
 import { CallLog } from "./audit.js";
 import { loadConfig } from "./config.js";
 import { Gate } from "./gate.js";
+import { OperationStore } from "./idempotency.js";
 import { log } from "./log.js";
 import { PayPalTokenManager } from "./paypal/auth.js";
+import { PayPalDirect } from "./paypal/direct.js";
 import { PayPalRest } from "./paypal/rest.js";
 import { connectUpstream } from "./paypal/upstream.js";
 import { loadPolicyFile } from "./policy/load.js";
@@ -36,10 +38,18 @@ async function main(): Promise<void> {
   const db = new DatabaseSync(config.dbPath);
   db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
   const callLog = new CallLog(db);
-  const gate = new Gate(upstream, new PayPalRest(config.paypalBaseUrl, tokens), callLog, new ApprovalStore(db), () => policy, {
-    approvalWaitMs: config.approvalWaitMs,
-    approvalTtlMs: config.approvalTtlMs,
-  });
+  const gate = new Gate(
+    {
+      upstream,
+      rest: new PayPalRest(config.paypalBaseUrl, tokens),
+      direct: new PayPalDirect(config.paypalBaseUrl, tokens),
+      callLog,
+      approvals: new ApprovalStore(db),
+      operations: new OperationStore(db, config.idempotencyWindowMs),
+      policy: () => policy,
+    },
+    { approvalWaitMs: config.approvalWaitMs, approvalTtlMs: config.approvalTtlMs },
+  );
 
   const { tools } = await upstream.listTools();
   log(`Upstream exposes ${tools.length} tools`);

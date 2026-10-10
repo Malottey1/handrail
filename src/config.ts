@@ -15,6 +15,8 @@ export interface Config {
   approvalWaitMs: number;
   /** How long a held call stays approvable. */
   approvalTtlMs: number;
+  /** Identical calls (no idempotency_key) within this window count as one operation. */
+  idempotencyWindowMs: number;
 }
 
 function positiveNumber(name: string, fallback: number): number {
@@ -57,5 +59,6 @@ export function loadConfig(): Config {
     adminToken: process.env.HANDRAIL_ADMIN_TOKEN?.trim() || undefined,
     approvalWaitMs: positiveNumber("HANDRAIL_APPROVAL_WAIT_SECONDS", 20) * 1000,
     approvalTtlMs: positiveNumber("HANDRAIL_APPROVAL_TTL_MINUTES", 60) * 60 * 1000,
+    idempotencyWindowMs: positiveNumber("HANDRAIL_IDEMPOTENCY_WINDOW_MINUTES", 60) * 60 * 1000,
   };
 }
