@@ -1,11 +1,17 @@
 import { createServer, type IncomingMessage } from "node:http";
+import { DatabaseSync } from "node:sqlite";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { handleAdmin } from "./admin-api.js";
+import { ApprovalStore } from "./approvals.js";
 import { CallLog } from "./audit.js";
 import { loadConfig } from "./config.js";
+import { Gate } from "./gate.js";
 import { log } from "./log.js";
 import { PayPalTokenManager } from "./paypal/auth.js";
+import { PayPalRest } from "./paypal/rest.js";
 import { connectUpstream } from "./paypal/upstream.js";
+import { loadPolicyFile } from "./policy/load.js";
 import { createProxyServer } from "./proxy.js";
 
 async function readJson(req: IncomingMessage): Promise<unknown> {
@@ -17,30 +23,40 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
 
 async function main(): Promise<void> {
   const config = loadConfig();
+  const stdio = process.argv.includes("--stdio");
+
+  // Load the policy before touching PayPal: a bad policy should stop startup.
+  const policy = loadPolicyFile(config.policyPath);
+  log(`Loaded policy ${config.policyPath} with ${policy.rules.length} rules`);
+
   const tokens = new PayPalTokenManager(config.paypalBaseUrl, config.paypalClientId, config.paypalClientSecret);
   await tokens.getToken(); // fail fast on bad credentials
   const upstream = await connectUpstream(config.paypalMcpUrl, tokens);
-  const callLog = new CallLog(config.dbPath);
+
+  const db = new DatabaseSync(config.dbPath);
+  db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
+  const callLog = new CallLog(db);
+  const gate = new Gate(upstream, new PayPalRest(config.paypalBaseUrl, tokens), callLog, new ApprovalStore(db), () => policy, {
+    approvalWaitMs: config.approvalWaitMs,
+    approvalTtlMs: config.approvalTtlMs,
+  });
 
   const { tools } = await upstream.listTools();
-  log(`Upstream exposes ${tools.length} tools: ${tools.map((t) => t.name).join(", ")}`);
+  log(`Upstream exposes ${tools.length} tools`);
 
-  if (process.argv.includes("--stdio")) {
-    await createProxyServer(upstream, callLog).connect(new StdioServerTransport());
-    log("Serving MCP over stdio");
-    return;
-  }
-
-  // Streamable HTTP, stateless: a fresh agent-facing server per request, all
-  // sharing the one upstream connection. No agent auth yet, so bind to
-  // localhost only until that exists.
+  // The HTTP server always runs: it carries the admin API (approvals), and the
+  // agent-facing /mcp endpoint when not in stdio mode. No agent auth on /mcp
+  // yet, so it binds to localhost unless HANDRAIL_HOST says otherwise.
   const host = process.env.HANDRAIL_HOST || "127.0.0.1";
   const http = createServer(async (req, res) => {
     if (req.url === "/health") {
       res.writeHead(200, { "Content-Type": "application/json" }).end('{"ok":true}');
       return;
     }
-    if (req.url !== "/mcp") {
+    if (await handleAdmin(req, res, { gate, callLog, policy: () => policy, adminToken: config.adminToken })) {
+      return;
+    }
+    if (stdio || req.url !== "/mcp") {
       res.writeHead(404).end();
       return;
     }
@@ -51,7 +67,7 @@ async function main(): Promise<void> {
 
     try {
       const body = await readJson(req);
-      const server = createProxyServer(upstream, callLog);
+      const server = createProxyServer(upstream, gate);
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
       res.on("close", () => {
         void transport.close();
@@ -69,7 +85,26 @@ async function main(): Promise<void> {
     }
   });
 
-  http.listen(config.port, host, () => log(`Serving MCP at http://${host}:${config.port}/mcp`));
+  http.on("error", (err: NodeJS.ErrnoException) => {
+    if (stdio && err.code === "EADDRINUSE") {
+      // Another Handrail owns the port; this stdio instance still works, but its
+      // held calls must be approved through that instance's API.
+      log(`Port ${config.port} is in use; admin API not started for this instance`);
+      return;
+    }
+    log("Fatal:", err.message);
+    process.exit(1);
+  });
+
+  http.listen(config.port, host, () => {
+    log(`Admin API at http://${host}:${config.port}/api${config.adminToken ? "" : " (disabled: set HANDRAIL_ADMIN_TOKEN)"}`);
+    if (!stdio) log(`Serving MCP at http://${host}:${config.port}/mcp`);
+  });
+
+  if (stdio) {
+    await createProxyServer(upstream, gate).connect(new StdioServerTransport());
+    log("Serving MCP over stdio");
+  }
 }
 
 main().catch((err) => {

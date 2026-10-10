@@ -8,6 +8,21 @@ export interface Config {
   paypalMcpUrl: string;
   port: number;
   dbPath: string;
+  policyPath: string;
+  /** Bearer token for the admin API. Unset disables it. */
+  adminToken: string | undefined;
+  /** How long a held call waits inline for a human before returning "pending". */
+  approvalWaitMs: number;
+  /** How long a held call stays approvable. */
+  approvalTtlMs: number;
+}
+
+function positiveNumber(name: string, fallback: number): number {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) throw new Error(`${name} must be a non-negative number, got ${raw}`);
+  return value;
 }
 
 function required(name: string): string {
@@ -36,7 +51,11 @@ export function loadConfig(): Config {
     paypalClientSecret: required("PAYPAL_CLIENT_SECRET"),
     paypalBaseUrl,
     paypalMcpUrl,
-    port: Number(process.env.PORT) || 3000,
+    port: Number(process.env.PORT) || 8787,
     dbPath: process.env.HANDRAIL_DB_PATH?.trim() || "handrail.db",
+    policyPath: process.env.HANDRAIL_POLICY_PATH?.trim() || "policy.json",
+    adminToken: process.env.HANDRAIL_ADMIN_TOKEN?.trim() || undefined,
+    approvalWaitMs: positiveNumber("HANDRAIL_APPROVAL_WAIT_SECONDS", 20) * 1000,
+    approvalTtlMs: positiveNumber("HANDRAIL_APPROVAL_TTL_MINUTES", 60) * 60 * 1000,
   };
 }
