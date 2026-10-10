@@ -13,6 +13,8 @@ import { getDefaultEnvironment, StdioClientTransport } from "@modelcontextprotoc
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 const auto = process.argv.includes("--auto");
+// Each run is its own set of operations, so a rerun isn't answered from the last run's results.
+const run = Date.now().toString(36);
 const FAKE_CAPTURE = "HANDRAILDEMO00000001";
 const FAKE_DISPUTE = "PP-D-HANDRAILDEMO1";
 
@@ -47,6 +49,7 @@ async function adminDecideFirstPending(action: "approve" | "reject", note: strin
 }
 
 async function step(title: string, tool: string, args: Record<string, unknown>, decide?: { action: "approve" | "reject"; note: string }) {
+  args = { ...args, idempotency_key: `demo-${run}-${title}` };
   console.log(`\n=== ${title}\n>>> ${tool} ${JSON.stringify(args)}`);
   if (decide && auto) setTimeout(() => void adminDecideFirstPending(decide.action, decide.note), 1500);
   if (decide && !auto) console.log(`(held for approval: run "npm run approvals" in another terminal, then ${decide.action} it)`);

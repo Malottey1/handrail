@@ -37,6 +37,7 @@ TypeScript, Node.js, the official MCP TypeScript SDK (Handrail is an MCP server 
 - SQLite uses Node's built-in `node:sqlite` (Node >= 22.13). `better-sqlite3` segfaulted on Node 23.4. Scripts pass `--disable-warning=ExperimentalWarning`.
 - PayPal's MCP server reports API failures as a normal result (`isError: false`) whose text is JSON like `{"ok":false,"status":404,...}`. `isUpstreamError` in `src/gate.ts` treats those as errors.
 - Many money tools carry no amount (full refunds, `pay_order`, `accept_dispute_claim`, `send_invoice`), so `src/policy/facts.ts` looks the amount up via read-only REST before deciding. Unknown amount or payee fails closed to `require_approval`.
+- Idempotency (`src/idempotency.ts`): every non-read call maps to an operation (agent's `idempotency_key`, or a hash of tool + canonical args within a 1-hour window). Repeats of in-flight / succeeded / held / rejected operations are answered without contacting PayPal. The Agent Toolkit sets `PayPal-Request-Id` once per client (agent-toolkit `typescript/src/shared/client.ts`), so `create_refund` and `pay_order` are sent directly to the REST API (`src/paypal/direct.ts`) with a per-operation request id; the body and result format match the toolkit. Unknown outcomes (timeout, 5xx, crash) reuse the request id for direct tools and are held for approval for MCP tools.
 - Default port is 8787 (3000 is used by another app on the dev machine).
 
 ## Commands
@@ -44,6 +45,7 @@ TypeScript, Node.js, the official MCP TypeScript SDK (Handrail is an MCP server 
 - `npm test`: unit tests (policy engine and gate; no network).
 - `npm run smoke`: starts Handrail over stdio, lists tools, makes one read-only call.
 - `npm run demo:approval [-- --auto]`: end-to-end allow / hold+approve / block / hold+reject against the sandbox, using a fake capture ID so no money moves.
+- `npm run demo:retry-storm [-- --capture <id> --amount 5.00 --count 10]`: identical refunds fired at once; PayPal receives one.
 - `npm run approvals [-- approve|reject <id> [note]]`: decide held calls via the admin API.
 - `npm run probe`: re-checks which PayPal MCP endpoints work.
 
