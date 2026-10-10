@@ -17,7 +17,9 @@
     "dev:stdio": "node --disable-warning=ExperimentalWarning --import tsx src/index.ts --stdio",
     "probe": "node --disable-warning=ExperimentalWarning --import tsx scripts/probe-upstream.ts",
     "smoke": "node --disable-warning=ExperimentalWarning --import tsx scripts/smoke-test.ts",
-    "test": "node --disable-warning=ExperimentalWarning --import tsx --test test/*.test.ts"
+    "test": "node --disable-warning=ExperimentalWarning --import tsx --test test/*.test.ts",
+    "approvals": "node --disable-warning=ExperimentalWarning --import tsx scripts/approvals.ts",
+    "demo:approval": "node --disable-warning=ExperimentalWarning --import tsx scripts/approval-demo.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",

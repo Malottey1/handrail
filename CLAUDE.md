@@ -35,7 +35,17 @@ TypeScript, Node.js, the official MCP TypeScript SDK (Handrail is an MCP server 
 - PayPal's sandbox MCP server only works over **SSE** at `https://mcp.sandbox.paypal.com/sse` (46 tools). The documented Streamable HTTP path `/http`, and `/mcp`, return 404 even with a valid token. `npm run probe` re-checks this.
 - The bearer token for the MCP server is a normal REST access token from `/v1/oauth2/token` (client credentials).
 - SQLite uses Node's built-in `node:sqlite` (Node >= 22.13). `better-sqlite3` segfaulted on Node 23.4. Scripts pass `--disable-warning=ExperimentalWarning`.
-- `npm run smoke` is the end-to-end check: starts Handrail over stdio, lists tools, makes one read-only call.
+- PayPal's MCP server reports API failures as a normal result (`isError: false`) whose text is JSON like `{"ok":false,"status":404,...}`. `isUpstreamError` in `src/gate.ts` treats those as errors.
+- Many money tools carry no amount (full refunds, `pay_order`, `accept_dispute_claim`, `send_invoice`), so `src/policy/facts.ts` looks the amount up via read-only REST before deciding. Unknown amount or payee fails closed to `require_approval`.
+- Default port is 8787 (3000 is used by another app on the dev machine).
+
+## Commands
+
+- `npm test`: unit tests (policy engine and gate; no network).
+- `npm run smoke`: starts Handrail over stdio, lists tools, makes one read-only call.
+- `npm run demo:approval [-- --auto]`: end-to-end allow / hold+approve / block / hold+reject against the sandbox, using a fake capture ID so no money moves.
+- `npm run approvals [-- approve|reject <id> [note]]`: decide held calls via the admin API.
+- `npm run probe`: re-checks which PayPal MCP endpoints work.
 
 ## Auth
 
