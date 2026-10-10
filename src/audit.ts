@@ -134,6 +134,13 @@ export class CallLog {
     }));
   }
 
+  /** Forwarded calls of one tool since `sinceMs`, newest first (for webhook matching). */
+  forwardedCalls(tool: string, sinceMs: number): CallRow[] {
+    return this.db
+      .prepare(`SELECT * FROM tool_calls WHERE forwarded = 1 AND tool = ? AND at_ms > ? ORDER BY id DESC`)
+      .all(tool, sinceMs) as unknown as CallRow[];
+  }
+
   recent(limit: number): CallRow[] {
     return this.db.prepare(`SELECT * FROM tool_calls ORDER BY id DESC LIMIT ?`).all(limit) as unknown as CallRow[];
   }

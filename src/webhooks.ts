@@ -1,0 +1,235 @@
+import type { DatabaseSync } from "node:sqlite";
+import type { CallOutcome, CallRow } from "./audit.js";
+import { formatMoney, toHundredths, type Money } from "./policy/money.js";
+
+export interface WebhookEvent {
+  id: string;
+  event_type: string;
+  summary?: string;
+  resource?: Record<string, any>;
+}
+
+/** A forwarded agent call, parsed for matching. */
+export interface ForwardedCall {
+  id: number;
+  tool: string;
+  createdAt: string;
+  args: Record<string, any>;
+  /** PayPal's JSON response, if the result was JSON. */
+  response: Record<string, any> | null;
+  amount: Money | null;
+  outcome: CallOutcome | null;
+}
+
+/**
+ * matched          the agent call that caused this event, with consistent details
+ * mismatch         the agent call was found, but PayPal's details disagree with it
+ * outside_handrail a merchant-only action (refund, invoice cancellation) with no agent call: something bypassed Handrail
+ * unrelated        no agent call, but this event is normal without one (e.g. a buyer paying)
+ * ignored          an event type Handrail doesn't track
+ */
+export type MatchStatus = "matched" | "mismatch" | "outside_handrail" | "unrelated" | "ignored";
+
+export interface MatchResult {
+  status: MatchStatus;
+  tool: string | null;
+  callId: number | null;
+  resourceId: string | null;
+  reasons: string[];
+}
+
+interface EventRule {
+  tool: string;
+  /** The PayPal object this event is about. */
+  resourceId(resource: Record<string, any>): string | null;
+  /** Whether this agent call caused the event. */
+  matches(resource: Record<string, any>, call: ForwardedCall): boolean;
+  /** The amount PayPal reports, compared with the amount the agent call moved. */
+  amount?(resource: Record<string, any>): Money | null;
+  /** What it means when no agent call matches. */
+  whenUnmatched: "outside_handrail" | "unrelated";
+}
+
+const lastSegment = (href: unknown) => (typeof href === "string" ? href.split("/").pop() ?? null : null);
+const linkTo = (resource: Record<string, any>, rel: string) =>
+  lastSegment((resource.links as Array<{ rel?: string; href?: string }> | undefined)?.find((l) => l.rel === rel)?.href);
+
+function money(amount: { currency_code?: string; value?: string } | undefined): Money | null {
+  if (!amount?.currency_code || typeof amount.value !== "string") return null;
+  const hundredths = toHundredths(amount.value);
+  return hundredths === null ? null : { hundredths, currency: amount.currency_code };
+}
+
+const invoiceId = (r: Record<string, any>) => (r.invoice?.id ?? r.id ?? null) as string | null;
+
+/** Which agent tool each tracked event type corresponds to, and how to recognise its call. */
+export const EVENT_RULES: Record<string, EventRule> = {
+  "PAYMENT.CAPTURE.REFUNDED": {
+    tool: "create_refund",
+    resourceId: (r) => r.id ?? null,
+    // The refund id from PayPal's response, or the capture the refund points "up" to.
+    matches: (r, call) => call.response?.id === r.id || (!!linkTo(r, "up") && call.args.capture_id === linkTo(r, "up")),
+    amount: (r) => money(r.amount),
+    whenUnmatched: "outside_handrail",
+  },
+  "PAYMENT.CAPTURE.COMPLETED": {
+    tool: "pay_order",
+    resourceId: (r) => r.id ?? null,
+    matches: (r, call) => {
+      const orderId = r.supplementary_data?.related_ids?.order_id;
+      const captures = call.response?.response?.purchase_units?.flatMap((u: any) => u.payments?.captures ?? []) ?? [];
+      return (!!orderId && call.args.id === orderId) || captures.some((c: any) => c.id === r.id);
+    },
+    amount: (r) => money(r.amount),
+    whenUnmatched: "unrelated",
+  },
+  "CUSTOMER.DISPUTE.RESOLVED": {
+    tool: "accept_dispute_claim",
+    resourceId: (r) => r.dispute_id ?? null,
+    matches: (r, call) => call.args.dispute_id === r.dispute_id,
+    whenUnmatched: "unrelated",
+  },
+  "CUSTOMER.DISPUTE.UPDATED": {
+    tool: "accept_dispute_claim",
+    resourceId: (r) => r.dispute_id ?? null,
+    matches: (r, call) => call.args.dispute_id === r.dispute_id,
+    whenUnmatched: "unrelated",
+  },
+  "INVOICING.INVOICE.CANCELLED": {
+    tool: "cancel_sent_invoice",
+    resourceId: invoiceId,
+    matches: (r, call) => call.args.invoice_id === invoiceId(r),
+    whenUnmatched: "outside_handrail",
+  },
+  "INVOICING.INVOICE.PAID": {
+    tool: "send_invoice",
+    resourceId: invoiceId,
+    matches: (r, call) => call.args.invoice_id === invoiceId(r),
+    whenUnmatched: "unrelated",
+  },
+  "BILLING.SUBSCRIPTION.CANCELLED": {
+    tool: "cancel_subscription",
+    resourceId: (r) => r.id ?? null,
+    matches: (r, call) => call.args.subscription_id === r.id,
+    whenUnmatched: "unrelated",
+  },
+};
+
+/**
+ * Matches a PayPal event to the agent call that caused it. Pure: `calls` are
+ * the forwarded calls of the event's tool, newest first.
+ */
+export function matchEvent(event: WebhookEvent, calls: ForwardedCall[]): MatchResult {
+  const rule = EVENT_RULES[event.event_type];
+  const resource = event.resource ?? {};
+  if (!rule) return { status: "ignored", tool: null, callId: null, resourceId: null, reasons: [] };
+
+  const resourceId = rule.resourceId(resource);
+  const call = calls.find((c) => c.tool === rule.tool && rule.matches(resource, c));
+  if (!call) {
+    const reasons =
+      rule.whenUnmatched === "outside_handrail"
+        ? [`PayPal reports a ${event.event_type} (${resourceId ?? "unknown id"}) that no agent call through Handrail made`]
+        : [];
+    return { status: rule.whenUnmatched, tool: rule.tool, callId: null, resourceId, reasons };
+  }
+
+  const reasons: string[] = [];
+  const reported = rule.amount?.(resource) ?? null;
+  if (reported && call.amount && (reported.currency !== call.amount.currency || reported.hundredths !== call.amount.hundredths)) {
+    reasons.push(`PayPal reports ${formatMoney(reported)}, but the agent call was for ${formatMoney(call.amount)}`);
+  }
+  if (call.outcome !== "succeeded") {
+    reasons.push(`PayPal reports this happened, but Handrail recorded the call's outcome as ${call.outcome ?? "unknown"}`);
+  }
+  return { status: reasons.length ? "mismatch" : "matched", tool: rule.tool, callId: call.id, resourceId, reasons };
+}
+
+export function parseForwardedCall(row: CallRow): ForwardedCall {
+  let response: Record<string, any> | null = null;
+  try {
+    const result = JSON.parse(row.result_json ?? "null");
+    const text = result?.content?.[0]?.text;
+    if (typeof text === "string") response = JSON.parse(text);
+  } catch {
+    // Non-JSON result: nothing to match on beyond the arguments.
+  }
+  return {
+    id: row.id,
+    tool: row.tool,
+    createdAt: row.created_at,
+    args: JSON.parse(row.args_json),
+    response,
+    amount: row.amount_hundredths !== null && row.currency ? { hundredths: row.amount_hundredths, currency: row.currency } : null,
+    outcome: row.outcome,
+  };
+}
+
+export interface StoredEvent {
+  event_id: string;
+  received_at: string;
+  event_type: string;
+  summary: string | null;
+  resource_id: string | null;
+  verified: number;
+  status: MatchStatus;
+  tool: string | null;
+  call_id: number | null;
+  reasons_json: string;
+}
+
+export class WebhookStore {
+  constructor(private readonly db: DatabaseSync) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS webhook_events (
+        event_id     TEXT    PRIMARY KEY,
+        received_at  TEXT    NOT NULL,
+        event_type   TEXT    NOT NULL,
+        summary      TEXT,
+        resource_id  TEXT,
+        verified     INTEGER NOT NULL,
+        status       TEXT    NOT NULL,
+        tool         TEXT,
+        call_id      INTEGER,
+        reasons_json TEXT    NOT NULL,
+        raw_json     TEXT    NOT NULL
+      );
+    `);
+  }
+
+  has(eventId: string): boolean {
+    return this.db.prepare(`SELECT 1 FROM webhook_events WHERE event_id = ?`).get(eventId) !== undefined;
+  }
+
+  /** Stores an event once; PayPal redelivers events, and repeats are ignored. */
+  insert(event: WebhookEvent, verified: boolean, match: MatchResult, raw: string, now: number): boolean {
+    const result = this.db
+      .prepare(
+        `INSERT OR IGNORE INTO webhook_events
+           (event_id, received_at, event_type, summary, resource_id, verified, status, tool, call_id, reasons_json, raw_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        event.id,
+        new Date(now).toISOString(),
+        event.event_type,
+        event.summary ?? null,
+        match.resourceId,
+        verified ? 1 : 0,
+        match.status,
+        match.tool,
+        match.callId,
+        JSON.stringify(match.reasons),
+        raw,
+      );
+    return result.changes === 1;
+  }
+
+  list(status?: MatchStatus, limit = 100): StoredEvent[] {
+    const cols = "event_id, received_at, event_type, summary, resource_id, verified, status, tool, call_id, reasons_json";
+    const rows = status
+      ? this.db.prepare(`SELECT ${cols} FROM webhook_events WHERE status = ? ORDER BY received_at DESC LIMIT ?`).all(status, limit)
+      : this.db.prepare(`SELECT ${cols} FROM webhook_events ORDER BY received_at DESC LIMIT ?`).all(limit);
+    return rows as unknown as StoredEvent[];
+  }
+}

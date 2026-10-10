@@ -4,10 +4,12 @@ import type { Approval, ApprovalStatus } from "./approvals.js";
 import type { CallLog } from "./audit.js";
 import { DecisionError, type Gate } from "./gate.js";
 import type { Policy } from "./policy/types.js";
+import type { MatchStatus, WebhookStore } from "./webhooks.js";
 
 export interface AdminDeps {
   gate: Gate;
   callLog: CallLog;
+  webhooks: WebhookStore;
   policy: () => Policy;
   /** Bearer token required on every /api request. Unset disables the API. */
   adminToken: string | undefined;
@@ -19,7 +21,7 @@ function send(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { "Content-Type": "application/json" }).end(JSON.stringify(body, null, 2));
 }
 
-function authorized(req: IncomingMessage, token: string): boolean {
+export function authorized(req: IncomingMessage, token: string): boolean {
   const header = req.headers.authorization ?? "";
   const given = Buffer.from(header.startsWith("Bearer ") ? header.slice(7) : "");
   const expected = Buffer.from(token);
@@ -65,6 +67,7 @@ function present(a: Approval) {
  *   POST /api/approvals/:id/approve   { "by": "name", "note": "..." }
  *   POST /api/approvals/:id/reject    { "by": "name", "note": "..." }
  *   GET  /api/calls?limit=50
+ *   GET  /api/webhooks?status=mismatch
  *   GET  /api/policy
  */
 export async function handleAdmin(req: IncomingMessage, res: ServerResponse, deps: AdminDeps): Promise<boolean> {
@@ -99,6 +102,10 @@ export async function handleAdmin(req: IncomingMessage, res: ServerResponse, dep
     } else if (req.method === "GET" && parts[1] === "calls" && parts.length === 2) {
       const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 50, 1), 500);
       send(res, 200, deps.callLog.recent(limit));
+    } else if (req.method === "GET" && parts[1] === "webhooks" && parts.length === 2) {
+      const status = (url.searchParams.get("status") as MatchStatus | null) ?? undefined;
+      const events = deps.webhooks.list(status).map(({ reasons_json, ...e }) => ({ ...e, reasons: JSON.parse(reasons_json) }));
+      send(res, 200, events);
     } else if (req.method === "GET" && parts[1] === "policy" && parts.length === 2) {
       send(res, 200, deps.policy());
     } else {

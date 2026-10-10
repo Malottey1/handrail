@@ -17,6 +17,19 @@ export interface Config {
   approvalTtlMs: number;
   /** Identical calls (no idempotency_key) within this window count as one operation. */
   idempotencyWindowMs: number;
+  /** Bearer token agents must send to /mcp over HTTP. Unset disables HTTP MCP (stdio still works). */
+  agentToken: string | undefined;
+  /** Webhook ID from the PayPal dashboard. Unset disables the webhook endpoint. */
+  paypalWebhookId: string | undefined;
+  /** Sandbox testing only: accept webhook events whose signature can't be verified. */
+  allowUnverifiedWebhooks: boolean;
+}
+
+function token(name: string): string | undefined {
+  const value = process.env[name]?.trim();
+  if (!value) return undefined;
+  if (value.length < 24) throw new Error(`${name} must be at least 24 characters (try: openssl rand -hex 32)`);
+  return value;
 }
 
 function positiveNumber(name: string, fallback: number): number {
@@ -56,9 +69,12 @@ export function loadConfig(): Config {
     port: Number(process.env.PORT) || 8787,
     dbPath: process.env.HANDRAIL_DB_PATH?.trim() || "handrail.db",
     policyPath: process.env.HANDRAIL_POLICY_PATH?.trim() || "policy.json",
-    adminToken: process.env.HANDRAIL_ADMIN_TOKEN?.trim() || undefined,
+    adminToken: token("HANDRAIL_ADMIN_TOKEN"),
     approvalWaitMs: positiveNumber("HANDRAIL_APPROVAL_WAIT_SECONDS", 20) * 1000,
     approvalTtlMs: positiveNumber("HANDRAIL_APPROVAL_TTL_MINUTES", 60) * 60 * 1000,
     idempotencyWindowMs: positiveNumber("HANDRAIL_IDEMPOTENCY_WINDOW_MINUTES", 60) * 60 * 1000,
+    agentToken: token("HANDRAIL_AGENT_TOKEN"),
+    paypalWebhookId: process.env.PAYPAL_WEBHOOK_ID?.trim() || undefined,
+    allowUnverifiedWebhooks: process.env.HANDRAIL_WEBHOOK_ALLOW_UNVERIFIED?.trim() === "true",
   };
 }
