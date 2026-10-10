@@ -42,10 +42,12 @@ TypeScript, Node.js, the official MCP TypeScript SDK (Handrail is an MCP server 
 - Verified end to end against the sandbox (Oct 10, 2026): a real capture via `pay_order`, then a 10-call retry storm on it gave one $5 refund at PayPal. Both webhooks (`PAYMENT.CAPTURE.COMPLETED`, `PAYMENT.CAPTURE.REFUNDED`) arrived signed, verified, and matched their calls. The registered webhook URL must end in `/webhooks/paypal`. PayPal can resend past events via `POST /v1/notifications/webhooks-events/{id}/resend`.
 - Audit log (`src/audit-chain.ts`): every write to tool_calls, approvals and webhook_events appends an `audit_chain` entry in the same `BEGIN IMMEDIATE` transaction. `hash = sha256(prev_hash, seq, at, kind, ref, data_json)`; triggers reject UPDATE/DELETE. `verify()` recomputes the chain and replays it against the working tables, so edits to either are caught. The first entry (`chain.started`, written at boot) snapshots rows that predate the chain. `GET /api/audit`, `GET /api/audit/verify`. Truncating the newest entries is only detectable against a head hash noted elsewhere.
 - HTTP `/mcp` requires `HANDRAIL_AGENT_TOKEN` (disabled without it) because a tunnel would otherwise expose it. Tokens must be >= 24 chars.
+- Dashboard: polls the admin API (approvals 2s, summary 3s, audit verify 10s); no websockets. Registers only the AG Grid modules it uses. Grid containers need an explicit height (a flex-grown height collapses the grid to 0).
 - Default port is 8787 (3000 is used by another app on the dev machine).
 
 ## Commands
 
+- `npm run build:web`: builds the dashboard (`web/`, React + AG Grid) into `web/dist`, which Handrail serves at `/` (sign in with `HANDRAIL_ADMIN_TOKEN`). `npm run dev:web` runs it with hot reload on :5173, proxying `/api` to :8787.
 - `npm test`: unit tests (policy engine and gate; no network).
 - `npm run smoke`: starts Handrail over stdio, lists tools, makes one read-only call.
 - `npm run demo:approval [-- --auto]`: end-to-end allow / hold+approve / block / hold+reject against the sandbox, using a fake capture ID so no money moves.
