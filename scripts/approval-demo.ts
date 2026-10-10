@@ -50,8 +50,23 @@ async function step(title: string, tool: string, args: Record<string, unknown>, 
   console.log(`\n=== ${title}\n>>> ${tool} ${JSON.stringify(args)}`);
   if (decide && auto) setTimeout(() => void adminDecideFirstPending(decide.action, decide.note), 1500);
   if (decide && !auto) console.log(`(held for approval: run "npm run approvals" in another terminal, then ${decide.action} it)`);
-  const result = (await client.callTool({ name: tool, arguments: args })) as CallToolResult;
+  let result = (await client.callTool({ name: tool, arguments: args })) as CallToolResult;
+
+  // Like a real agent: if the call is still pending, keep checking until a human decides.
+  for (let id = pendingId(result); id; id = pendingId(result)) {
+    console.log(`... still waiting for a human to decide ${id}`);
+    result = (await client.callTool({ name: "handrail_get_approval", arguments: { approval_id: id, wait_seconds: 25 } })) as CallToolResult;
+  }
   console.log(`<<< isError=${result.isError === true}\n${text(result).slice(0, 1200)}`);
+}
+
+function pendingId(result: CallToolResult): string | null {
+  try {
+    const { handrail } = JSON.parse(text(result));
+    return handrail?.status === "pending_approval" ? handrail.approval_id : null;
+  } catch {
+    return null;
+  }
 }
 
 await step("1. Small refund: allowed, forwarded to PayPal", "create_refund", {
