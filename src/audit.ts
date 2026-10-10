@@ -175,6 +175,13 @@ export class CallLog {
       .all(tool, sinceMs) as unknown as CallRow[];
   }
 
+  /** Call counts since `sinceMs` by decision and outcome, for the dashboard summary. */
+  counts(sinceMs: number): Array<{ decision: string; outcome: string | null; n: number }> {
+    return this.db
+      .prepare(`SELECT decision, outcome, count(*) AS n FROM tool_calls WHERE at_ms > ? GROUP BY decision, outcome`)
+      .all(sinceMs) as Array<{ decision: string; outcome: string | null; n: number }>;
+  }
+
   recent(limit: number): CallRow[] {
     return this.db.prepare(`SELECT * FROM tool_calls ORDER BY id DESC LIMIT ?`).all(limit) as unknown as CallRow[];
   }

@@ -60,10 +60,35 @@ function present(a: Approval) {
   };
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function summary(deps: AdminDeps) {
+  const counts = deps.callLog.counts(Date.now() - DAY_MS);
+  const total = (match: (c: { decision: string; outcome: string | null }) => boolean) =>
+    counts.filter(match).reduce((sum, c) => sum + c.n, 0);
+  const webhooks = deps.webhooks.list(undefined, 1000);
+  return {
+    pendingApprovals: deps.gate.listApprovals("pending").length,
+    last24h: {
+      calls: total(() => true),
+      forwarded: total((c) => c.decision !== "duplicate" && c.outcome !== "held" && c.outcome !== "blocked"),
+      held: total((c) => c.outcome === "held"),
+      blocked: total((c) => c.decision === "block" || c.outcome === "blocked"),
+      duplicates: total((c) => c.decision === "duplicate"),
+      failed: total((c) => c.outcome === "failed" || c.outcome === "unknown"),
+    },
+    webhooks: {
+      total: webhooks.length,
+      flagged: webhooks.filter((w) => w.status === "mismatch" || w.status === "outside_handrail").length,
+    },
+  };
+}
+
 /**
  * REST API for humans (and later the dashboard). Returns false if the request
  * isn't an /api route.
  *
+ *   GET  /api/summary                      (counts for the last 24 hours)
  *   GET  /api/approvals?status=pending
  *   GET  /api/approvals/:id
  *   POST /api/approvals/:id/approve   { "by": "name", "note": "..." }
@@ -89,7 +114,9 @@ export async function handleAdmin(req: IncomingMessage, res: ServerResponse, dep
 
   const parts = url.pathname.split("/").filter(Boolean); // ["api", ...]
   try {
-    if (req.method === "GET" && parts[1] === "approvals" && parts.length === 2) {
+    if (req.method === "GET" && parts[1] === "summary" && parts.length === 2) {
+      send(res, 200, summary(deps));
+    } else if (req.method === "GET" && parts[1] === "approvals" && parts.length === 2) {
       const status = url.searchParams.get("status") as ApprovalStatus | null;
       if (status && !STATUSES.has(status)) send(res, 400, { error: `Unknown status ${status}` });
       else send(res, 200, deps.gate.listApprovals(status ?? undefined).map(present));

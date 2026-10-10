@@ -16,6 +16,7 @@ import { PayPalRest } from "./paypal/rest.js";
 import { connectUpstream } from "./paypal/upstream.js";
 import { loadPolicyFile } from "./policy/load.js";
 import { createProxyServer } from "./proxy.js";
+import { serveDashboard } from "./static.js";
 import { handleWebhook } from "./webhook-endpoint.js";
 import { WebhookStore } from "./webhooks.js";
 
@@ -25,6 +26,9 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   const raw = Buffer.concat(chunks).toString("utf8");
   return raw ? JSON.parse(raw) : undefined;
 }
+
+/** The built React dashboard (npm run build:web). */
+const DASHBOARD_DIR = process.env.HANDRAIL_DASHBOARD_DIR?.trim() || "web/dist";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -86,6 +90,9 @@ async function main(): Promise<void> {
     if (await handleAdmin(req, res, { gate, callLog, webhooks, audit, policy: () => policy, adminToken: config.adminToken })) {
       return;
     }
+    if (path !== "/mcp" && (await serveDashboard(req, res, DASHBOARD_DIR))) {
+      return;
+    }
     if (stdio || path !== "/mcp") {
       res.writeHead(404).end();
       return;
@@ -137,6 +144,7 @@ async function main(): Promise<void> {
   });
 
   http.listen(config.port, host, () => {
+    log(`Dashboard at http://${host}:${config.port}/${config.adminToken ? "" : " (needs HANDRAIL_ADMIN_TOKEN)"}`);
     log(`Admin API at http://${host}:${config.port}/api${config.adminToken ? "" : " (disabled: set HANDRAIL_ADMIN_TOKEN)"}`);
     if (!stdio) log(`MCP at http://${host}:${config.port}/mcp${config.agentToken ? "" : " (disabled: set HANDRAIL_AGENT_TOKEN)"}`);
     log(`PayPal webhooks at http://${host}:${config.port}/webhooks/paypal${config.paypalWebhookId ? "" : " (disabled: set PAYPAL_WEBHOOK_ID)"}`);
