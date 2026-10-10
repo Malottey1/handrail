@@ -1,0 +1,31 @@
+{
+  "name": "handrail",
+  "version": "0.1.0",
+  "description": "A safety layer between AI agents and PayPal's Agent Toolkit MCP server",
+  "license": "MIT",
+  "author": "Malcolm Clottey",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "start": "node --disable-warning=ExperimentalWarning dist/src/index.js",
+    "dev": "node --disable-warning=ExperimentalWarning --import tsx src/index.ts",
+    "dev:stdio": "node --disable-warning=ExperimentalWarning --import tsx src/index.ts --stdio",
+    "probe": "node --disable-warning=ExperimentalWarning --import tsx scripts/probe-upstream.ts",
+    "smoke": "node --disable-warning=ExperimentalWarning --import tsx scripts/smoke-test.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "dotenv": "^18.0.6",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
+  }
+}
