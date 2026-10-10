@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "defaults": {
+    "read": "allow",
+    "write": "allow",
+    "money": "allow",
+    "unknown": "require_approval"
+  },
+  "rules": [
+    {
+      "id": "refund-approval-over-100",
+      "description": "Refunds over $100 need a human",
+      "type": "amount_ceiling",
+      "tools": ["create_refund", "record_refund_for_invoice"],
+      "max": "100.00",
+      "currency": "USD",
+      "decision": "require_approval"
+    },
+    {
+      "id": "refund-hard-cap-1000",
+      "description": "Agents can never refund more than $1,000 in one call",
+      "type": "amount_ceiling",
+      "tools": ["create_refund", "record_refund_for_invoice"],
+      "max": "1000.00",
+      "currency": "USD",
+      "decision": "block"
+    },
+    {
+      "id": "refund-daily-spend-500",
+      "description": "More than $500 of refunds in 24 hours needs a human",
+      "type": "spend_limit",
+      "tools": ["create_refund"],
+      "max": "500.00",
+      "currency": "USD",
+      "windowSeconds": 86400,
+      "decision": "require_approval"
+    },
+    {
+      "id": "refund-rate-5-per-hour",
+      "description": "At most 5 refunds per hour",
+      "type": "rate_limit",
+      "tools": ["create_refund"],
+      "max": 5,
+      "windowSeconds": 3600,
+      "decision": "block"
+    },
+    {
+      "id": "capture-approval-over-500",
+      "description": "Captures over $500 need a human",
+      "type": "amount_ceiling",
+      "tools": ["pay_order"],
+      "max": "500.00",
+      "currency": "USD",
+      "decision": "require_approval"
+    },
+    {
+      "id": "disputes-need-approval",
+      "description": "Conceding a dispute always needs a human",
+      "type": "tool",
+      "tools": ["accept_dispute_claim"],
+      "decision": "require_approval"
+    },
+    {
+      "id": "cancellations-need-approval",
+      "description": "Cancelling invoices, subscriptions or recurring series needs a human",
+      "type": "tool",
+      "tools": ["cancel_sent_invoice", "cancel_subscription", "cancel_recurring_series"],
+      "decision": "require_approval"
+    },
+    {
+      "id": "invoice-send-over-2000",
+      "description": "Sending an invoice over $2,000 needs a human",
+      "type": "amount_ceiling",
+      "tools": ["send_invoice"],
+      "max": "2000.00",
+      "currency": "USD",
+      "decision": "require_approval"
+    }
+  ]
+}
