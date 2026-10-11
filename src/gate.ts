@@ -40,6 +40,11 @@ export interface GateDeps {
   approvals: ApprovalStore;
   operations: OperationStore;
   policy: () => Policy;
+  /**
+   * Called after a call is held and recorded (e.g. to write an AI explanation).
+   * Fire-and-forget: it runs after the decision and can't affect it.
+   */
+  onHeld?: (approval: Approval) => void;
 }
 
 export interface GateOptions {
@@ -118,6 +123,7 @@ export class Gate {
       requestId: operation && DIRECT_TOOLS.has(tool) ? operation.requestId : undefined,
       now,
     });
+    if (approval) this.notifyHeld(approval);
 
     log(`${tool} -> ${evaluation.decision}: ${evaluation.reason}${describeAmount(facts)}`);
 
@@ -370,6 +376,14 @@ export class Gate {
       if (operation) this.finishOperation(operation, "abandoned");
       log(`approval ${id} expired`);
       this.events.emit(id);
+    }
+  }
+
+  private notifyHeld(approval: Approval): void {
+    try {
+      this.deps.onHeld?.(approval);
+    } catch (err) {
+      log(`onHeld hook failed for ${approval.id}: ${(err as Error).message}`);
     }
   }
 

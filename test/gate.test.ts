@@ -422,3 +422,31 @@ describe("audit chain through the gate", () => {
     }
   });
 });
+
+describe("onHeld hook", () => {
+  it("runs after a call is held, and a failing hook doesn't change the decision", async () => {
+    const db = new DatabaseSync(":memory:");
+    const seen: string[] = [];
+    const base = setup({ db });
+    const gate = new Gate(
+      {
+        upstream: {} as Client,
+        rest: { get: async () => ({ amount: { currency_code: "USD", value: "40.00" } }) } as unknown as PayPalRest,
+        direct: { call: async () => ({ content: [] }) },
+        callLog: base.callLog,
+        approvals: new ApprovalStore(db),
+        operations: base.operations,
+        policy: () => POLICY,
+        onHeld: (a) => {
+          seen.push(a.id);
+          throw new Error("explainer exploded");
+        },
+      },
+      { approvalWaitMs: 0, approvalTtlMs: 60 * MINUTE },
+    );
+    const result = await gate.handle("create_refund", { capture_id: "CAP1", amount: { currency_code: "USD", value: "150.00" } });
+    assert.equal(seen.length, 1);
+    assert.match((result.content[0] as { text: string }).text, /pending_approval/);
+    assert.equal(gate.listApprovals("pending")[0]!.id, seen[0]);
+  });
+});

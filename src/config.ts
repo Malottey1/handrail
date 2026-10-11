@@ -23,6 +23,9 @@ export interface Config {
   paypalWebhookId: string | undefined;
   /** Sandbox testing only: accept webhook events whose signature can't be verified. */
   allowUnverifiedWebhooks: boolean;
+  /** Anthropic API key for explanations and policy compilation. Unset disables the AI features; enforcement never needs it. */
+  anthropicApiKey: string | undefined;
+  aiModel: string;
 }
 
 function token(name: string): string | undefined {
@@ -76,5 +79,7 @@ export function loadConfig(): Config {
     agentToken: token("HANDRAIL_AGENT_TOKEN"),
     paypalWebhookId: process.env.PAYPAL_WEBHOOK_ID?.trim() || undefined,
     allowUnverifiedWebhooks: process.env.HANDRAIL_WEBHOOK_ALLOW_UNVERIFIED?.trim() === "true",
+    anthropicApiKey: process.env.ANTHROPIC_API_KEY?.trim() || undefined,
+    aiModel: process.env.HANDRAIL_AI_MODEL?.trim() || "claude-opus-5-5",
   };
 }

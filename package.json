@@ -27,6 +27,7 @@
     "build:web": "vite build --config web/vite.config.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
     "@modelcontextprotocol/sdk": "^1.32.1",
     "ag-grid-community": "^36.2.0",
     "ag-grid-react": "^36.2.0",

@@ -10,7 +10,10 @@ import { canonicalJson } from "./idempotency.js";
  * approval.decided   a human approved or rejected it
  * approval.completed the approved call's outcome
  * approval.expired   nobody decided in time
+ * approval.explained the AI explanation shown to the reviewer (advisory only)
  * webhook.received   a PayPal event and what it was matched to
+ * policy.loaded      the policy in force at startup (when it differs from the last one recorded)
+ * policy.changed     a human changed the policy from the dashboard
  */
 export type AuditKind =
   | "chain.started"
@@ -21,7 +24,10 @@ export type AuditKind =
   | "approval.decided"
   | "approval.completed"
   | "approval.expired"
-  | "webhook.received";
+  | "approval.explained"
+  | "webhook.received"
+  | "policy.loaded"
+  | "policy.changed";
 
 export interface AuditEntry {
   kind: AuditKind;
@@ -247,6 +253,7 @@ function checkWorkingTables(db: DatabaseSync, rows: AuditRow[]): VerifyResult["p
         ["decided_by", (row.decided_by ?? null) === (want.decidedBy ?? null)],
         ["note", (row.note ?? null) === (want.note ?? null)],
         ["result", same(parse(row.result_json), want.result)],
+        ["explanation", !("explanation" in want) || same(parse(row.explanation_json), want.explanation)],
       ];
       for (const [field, ok] of checks) if (!ok) flag(ref, `approvals ${field} differs from the audit log`);
     }

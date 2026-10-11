@@ -182,6 +182,13 @@ export class CallLog {
       .all(sinceMs) as Array<{ decision: string; outcome: string | null; n: number }>;
   }
 
+  /** Every call since `sinceMs`, newest first (context for AI explanations). */
+  since(sinceMs: number, limit = 500): CallRow[] {
+    return this.db
+      .prepare(`SELECT * FROM tool_calls WHERE at_ms > ? ORDER BY id DESC LIMIT ?`)
+      .all(sinceMs, limit) as unknown as CallRow[];
+  }
+
   recent(limit: number): CallRow[] {
     return this.db.prepare(`SELECT * FROM tool_calls ORDER BY id DESC LIMIT ?`).all(limit) as unknown as CallRow[];
   }

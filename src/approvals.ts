@@ -16,6 +16,22 @@ export type ApprovalStatus = "pending" | "executing" | "executed" | "failed" | "
 
 export const FINAL_STATUSES: ReadonlySet<ApprovalStatus> = new Set(["executed", "failed", "blocked", "rejected", "expired"]);
 
+/**
+ * pending      being written
+ * ready        written; `explanation` holds it
+ * failed       the model call failed (the approval works the same without it)
+ * unavailable  AI features are off (no ANTHROPIC_API_KEY)
+ */
+export type ExplanationStatus = "pending" | "ready" | "failed" | "unavailable";
+
+export interface Explanation {
+  summary: string;
+  whyHeld: string;
+  context: string[];
+  checkBeforeApproving: string[];
+  concerns: string[];
+}
+
 export interface Approval {
   id: string;
   createdAt: number;
@@ -29,6 +45,10 @@ export interface Approval {
   decidedBy: string | null;
   note: string | null;
   result: unknown;
+  /** Advisory text for the reviewer. Never consulted by the gate. */
+  explanation: Explanation | null;
+  explanationStatus: ExplanationStatus | null;
+  explanationModel: string | null;
 }
 
 interface ApprovalRow {
@@ -43,6 +63,9 @@ interface ApprovalRow {
   decided_by: string | null;
   note: string | null;
   result_json: string | null;
+  explanation_json: string | null;
+  explanation_status: ExplanationStatus | null;
+  explanation_model: string | null;
 }
 
 /** Every change is also appended to the audit chain, in the same transaction. */
@@ -67,6 +90,27 @@ export class ApprovalStore {
       );
       CREATE INDEX IF NOT EXISTS approvals_status ON approvals (status, expires_at);
     `);
+    const existing = new Set((db.prepare(`PRAGMA table_info(approvals)`).all() as Array<{ name: string }>).map((c) => c.name));
+    for (const column of ["explanation_json", "explanation_status", "explanation_model"]) {
+      if (!existing.has(column)) db.exec(`ALTER TABLE approvals ADD COLUMN ${column} TEXT`);
+    }
+  }
+
+  /**
+   * Stores the reviewer explanation. The audit entry records exactly what the
+   * approver was shown, and by which model.
+   */
+  setExplanation(id: string, status: ExplanationStatus, explanation: Explanation | null, model: string | null, now: number): void {
+    this.chain.record(now, () => {
+      this.db
+        .prepare(`UPDATE approvals SET explanation_status = ?, explanation_json = ?, explanation_model = ? WHERE id = ?`)
+        .run(status, explanation ? JSON.stringify(explanation) : null, model, id);
+      const entries =
+        status === "ready" || status === "failed"
+          ? [{ kind: "approval.explained" as const, ref: `approval:${id}`, data: { explanationStatus: status, explanation, model } }]
+          : [];
+      return { value: undefined, entries };
+    });
   }
 
   create(facts: CallFacts, evaluation: Evaluation, now: number, ttlMs: number): Approval {
@@ -155,5 +199,8 @@ function fromRow(row: ApprovalRow): Approval {
     decidedBy: row.decided_by,
     note: row.note,
     result: row.result_json ? JSON.parse(row.result_json) : null,
+    explanation: row.explanation_json ? (JSON.parse(row.explanation_json) as Explanation) : null,
+    explanationStatus: row.explanation_status,
+    explanationModel: row.explanation_model,
   };
 }
