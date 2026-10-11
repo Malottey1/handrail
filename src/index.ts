@@ -14,7 +14,10 @@ import { PayPalTokenManager } from "./paypal/auth.js";
 import { PayPalDirect } from "./paypal/direct.js";
 import { PayPalRest } from "./paypal/rest.js";
 import { connectUpstream } from "./paypal/upstream.js";
+import { AnthropicLlm } from "./ai/llm.js";
+import { Explainer } from "./ai/explain.js";
 import { loadPolicyFile } from "./policy/load.js";
+import { PolicyStore } from "./policy/store.js";
 import { createProxyServer } from "./proxy.js";
 import { serveDashboard } from "./static.js";
 import { handleWebhook } from "./webhook-endpoint.js";
@@ -51,6 +54,14 @@ async function main(): Promise<void> {
   const approvals = new ApprovalStore(db, audit);
   const operations = new OperationStore(db, config.idempotencyWindowMs);
   audit.start(Date.now());
+  const policyStore = new PolicyStore(config.policyPath, audit, policy);
+  policyStore.recordLoaded(Date.now());
+
+  // AI is advisory only: explanations for reviewers and drafting rules. The
+  // gate's decisions never depend on it, and everything works without a key.
+  const llm = config.anthropicApiKey ? new AnthropicLlm(config.anthropicApiKey, config.aiModel) : null;
+  log(llm ? `AI features on (${config.aiModel})` : "AI features off: set ANTHROPIC_API_KEY to enable explanations and plain-English rules");
+  const explainer = new Explainer(llm, approvals, callLog, () => policyStore.get());
   const gate = new Gate(
     {
       upstream,
@@ -59,7 +70,8 @@ async function main(): Promise<void> {
       callLog,
       approvals,
       operations,
-      policy: () => policy,
+      policy: () => policyStore.get(),
+      onHeld: (approval) => void explainer.explain(approval),
     },
     { approvalWaitMs: config.approvalWaitMs, approvalTtlMs: config.approvalTtlMs },
   );
@@ -87,7 +99,7 @@ async function main(): Promise<void> {
       });
       return;
     }
-    if (await handleAdmin(req, res, { gate, callLog, webhooks, audit, policy: () => policy, adminToken: config.adminToken })) {
+    if (await handleAdmin(req, res, { gate, callLog, webhooks, audit, policy: policyStore, llm, adminToken: config.adminToken })) {
       return;
     }
     if (path !== "/mcp" && (await serveDashboard(req, res, DASHBOARD_DIR))) {

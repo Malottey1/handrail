@@ -1,10 +1,12 @@
 import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { CompileError, compilePolicy } from "./ai/compile.js";
+import type { Llm } from "./ai/llm.js";
 import type { Approval, ApprovalStatus } from "./approvals.js";
 import type { AuditChain } from "./audit-chain.js";
 import type { CallLog } from "./audit.js";
 import { DecisionError, type Gate } from "./gate.js";
-import type { Policy } from "./policy/types.js";
+import { PolicyConflictError, type PolicyStore } from "./policy/store.js";
 import type { MatchStatus, WebhookStore } from "./webhooks.js";
 
 export interface AdminDeps {
@@ -12,7 +14,9 @@ export interface AdminDeps {
   callLog: CallLog;
   webhooks: WebhookStore;
   audit: AuditChain;
-  policy: () => Policy;
+  policy: PolicyStore;
+  /** For compiling plain-English rules. Null when AI features are off. */
+  llm: Llm | null;
   /** Bearer token required on every /api request. Unset disables the API. */
   adminToken: string | undefined;
 }
@@ -57,6 +61,9 @@ function present(a: Approval) {
     decidedBy: a.decidedBy,
     note: a.note,
     result: a.result,
+    explanation: a.explanation,
+    explanationStatus: a.explanationStatus,
+    explanationModel: a.explanationModel,
   };
 }
 
@@ -97,7 +104,9 @@ function summary(deps: AdminDeps) {
  *   GET  /api/webhooks?status=mismatch
  *   GET  /api/audit?limit=100&ref=call:12   (newest first)
  *   GET  /api/audit/verify
- *   GET  /api/policy
+ *   GET  /api/policy                       { policy, hash, ai }
+ *   POST /api/policy/compile               { instruction }  -> a proposal; changes nothing
+ *   PUT  /api/policy                       { policy, baseHash, by, source }  -> the confirmed change
  */
 export async function handleAdmin(req: IncomingMessage, res: ServerResponse, deps: AdminDeps): Promise<boolean> {
   const url = new URL(req.url ?? "/", "http://localhost");
@@ -144,12 +153,35 @@ export async function handleAdmin(req: IncomingMessage, res: ServerResponse, dep
     } else if (req.method === "GET" && parts[1] === "audit" && parts[2] === "verify" && parts.length === 3) {
       send(res, 200, deps.audit.verify());
     } else if (req.method === "GET" && parts[1] === "policy" && parts.length === 2) {
-      send(res, 200, deps.policy());
+      send(res, 200, { policy: deps.policy.get(), hash: deps.policy.hash(), ai: { enabled: !!deps.llm, model: deps.llm?.model ?? null } });
+    } else if (req.method === "POST" && parts[1] === "policy" && parts[2] === "compile" && parts.length === 3) {
+      if (!deps.llm) {
+        send(res, 503, { error: "AI features are off: set ANTHROPIC_API_KEY in .env" });
+      } else {
+        const body = await readBody(req);
+        const baseHash = deps.policy.hash();
+        const proposal = await compilePolicy(typeof body.instruction === "string" ? body.instruction : "", deps.policy.get(), deps.llm);
+        send(res, 200, { ...proposal, baseHash, model: deps.llm.model });
+      }
+    } else if (req.method === "PUT" && parts[1] === "policy" && parts.length === 2) {
+      const body = await readBody(req);
+      const by = typeof body.by === "string" && body.by.trim() ? body.by.trim().slice(0, 100) : "admin";
+      const source = typeof body.source === "string" && body.source.trim() ? body.source.trim().slice(0, 1000) : null;
+      try {
+        deps.policy.replace(body.policy, { by, source, baseHash: String(body.baseHash ?? ""), now: Date.now() });
+        send(res, 200, { policy: deps.policy.get(), hash: deps.policy.hash() });
+      } catch (err) {
+        if (err instanceof PolicyConflictError) send(res, 409, { error: err.message });
+        else if (err instanceof Error && err.message.startsWith("Invalid policy")) send(res, 400, { error: err.message });
+        else throw err;
+      }
     } else {
       send(res, 404, { error: "Not found" });
     }
   } catch (err) {
     if (err instanceof DecisionError) send(res, err.status, { error: err.message });
+    else if (err instanceof CompileError) send(res, 422, { error: err.message });
+    else if (err instanceof Error && err.name.endsWith("APIError")) send(res, 502, { error: `AI request failed: ${err.message}` });
     else if (err instanceof SyntaxError) send(res, 400, { error: "Body must be JSON" });
     else send(res, 500, { error: (err as Error).message });
   }
