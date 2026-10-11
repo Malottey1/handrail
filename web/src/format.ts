@@ -1,20 +1,6 @@
 import type { CallRow, Money } from "./api";
 
-const TOOL_LABELS: Record<string, string> = {
-  create_refund: "Refund",
-  pay_order: "Capture payment",
-  accept_dispute_claim: "Accept dispute",
-  cancel_sent_invoice: "Cancel invoice",
-  cancel_subscription: "Cancel subscription",
-  cancel_recurring_series: "Cancel recurring series",
-  send_invoice: "Send invoice",
-  send_invoice_reminder: "Send invoice reminder",
-  record_refund_for_invoice: "Record invoice refund",
-};
-
-export function toolLabel(tool: string): string {
-  return TOOL_LABELS[tool] ?? tool.replaceAll("_", " ").replace(/^./, (c) => c.toUpperCase());
-}
+export { describeRule, duration, toolLabel } from "../../src/policy/describe.js";
 
 export function formatMoney(m: Money | null | undefined): string {
   if (!m) return "—";
@@ -50,13 +36,6 @@ export function countdown(iso: string, now = Date.now()): string {
   if (s <= 0) return "expired";
   const m = Math.floor(s / 60);
   return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m left` : `${m}:${String(s % 60).padStart(2, "0")} left`;
-}
-
-export function duration(seconds: number): string {
-  if (seconds % 86400 === 0) return seconds === 86400 ? "a day" : `${seconds / 86400} days`;
-  if (seconds % 3600 === 0) return seconds === 3600 ? "an hour" : `${seconds / 3600} hours`;
-  if (seconds % 60 === 0) return `${seconds / 60} minutes`;
-  return `${seconds} seconds`;
 }
 
 export function parseJson<T = unknown>(json: string | null | undefined): T | null {

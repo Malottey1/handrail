@@ -1,4 +1,7 @@
 // Typed client for Handrail's admin API (src/admin-api.ts).
+import type { Policy, Rule } from "../../src/policy/types.js";
+
+export type { Policy, Rule };
 
 export interface Session {
   token: string;
@@ -69,6 +72,17 @@ export interface Approval {
   decidedBy: string | null;
   note: string | null;
   result: unknown;
+  explanation: Explanation | null;
+  explanationStatus: "pending" | "ready" | "failed" | "unavailable" | null;
+  explanationModel: string | null;
+}
+
+export interface Explanation {
+  summary: string;
+  whyHeld: string;
+  context: string[];
+  checkBeforeApproving: string[];
+  concerns: string[];
 }
 
 export interface CallRow {
@@ -130,21 +144,21 @@ export interface Summary {
   webhooks: { total: number; flagged: number };
 }
 
-export type Rule = {
-  id: string;
-  description?: string;
-  tools: string[];
-  decision: Decision;
-} & (
-  | { type: "tool" }
-  | { type: "amount_ceiling"; max: string; currency: string }
-  | { type: "rate_limit"; max: number; windowSeconds: number }
-  | { type: "spend_limit"; max: string; currency: string; windowSeconds: number }
-  | { type: "payee_allowlist"; allow: string[] }
-);
+export interface PolicyResponse {
+  policy: Policy;
+  hash: string;
+  ai: { enabled: boolean; model: string | null };
+}
 
-export interface Policy {
-  version: 1;
-  defaults: Record<"read" | "write" | "money" | "unknown", Decision>;
-  rules: Rule[];
+/** From POST /api/policy/compile. Nothing changes until it's sent back with PUT /api/policy. */
+export interface PolicyProposal {
+  question: string | null;
+  add: Rule[];
+  remove: string[];
+  assumptions: string[];
+  sentences: { add: string[]; remove: string[] };
+  warnings: string[];
+  policy: Policy;
+  baseHash: string;
+  model: string;
 }

@@ -11,6 +11,9 @@
   --accent: #0f7a64;
   --accent-hover: #0c6352;
   --logo-ink: #e8f5f1;
+  --ai: #5b3fc4;
+  --ai-bg: #f6f3ff;
+  --ai-line: #e4dcfb;
 
   --good: #137a4b;
   --good-bg: #e3f4ea;
@@ -43,6 +46,9 @@
     --accent: #2fa587;
     --accent-hover: #3fbf9f;
     --logo-ink: #0f1215;
+    --ai: #b5a2ff;
+    --ai-bg: #1c1830;
+    --ai-line: #322a52;
 
     --good: #5fd39a;
     --good-bg: #13301f;
@@ -905,4 +911,258 @@ a {
     grid-template-columns: minmax(0, 1fr);
     gap: 2px;
   }
+}
+
+/* AI brief */
+
+.ai {
+  border: 1px solid var(--ai-line);
+  background: var(--ai-bg);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ai-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ai-label {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ai);
+  display: inline-flex;
+  gap: 6px;
+}
+
+.ai-note {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.ai-summary {
+  font-weight: 500;
+}
+
+.ai-sub {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+  margin-top: 4px;
+}
+
+.ai ul {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ai-checks {
+  list-style: none;
+  padding-left: 0 !important;
+}
+
+.ai-checks li::before {
+  content: "☐";
+  color: var(--ai);
+  margin-right: 8px;
+}
+
+.ai-concerns {
+  background: var(--bad-bg);
+  color: var(--bad);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.ai-concerns .ai-sub {
+  color: var(--bad);
+  margin-top: 0;
+}
+
+.ai-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.shimmer {
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--ai-line) 0%, var(--ai-bg) 50%, var(--ai-line) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+.shimmer.short {
+  width: 60%;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shimmer {
+    animation: none;
+  }
+}
+
+/* Policy composer */
+
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.composer textarea {
+  resize: vertical;
+  min-height: 72px;
+  line-height: 1.45;
+}
+
+.examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.example {
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink-2);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.example:hover {
+  border-color: var(--ink-3);
+  color: var(--ink);
+}
+
+.composer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.proposal {
+  border: 1px solid var(--ai-line);
+  background: var(--ai-bg);
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.proposal-title {
+  font-weight: 650;
+}
+
+.change-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.change-list li {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.change-sign {
+  font-family: var(--mono);
+  font-weight: 700;
+  width: 14px;
+}
+
+.change-add .change-sign {
+  color: var(--good);
+}
+
+.change-remove {
+  color: var(--ink-3);
+}
+
+.change-remove .change-sign {
+  color: var(--bad);
+}
+
+.change-remove span:last-child {
+  text-decoration: line-through;
+}
+
+.warnings {
+  background: var(--warn-bg);
+  color: var(--warn);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 0;
+  list-style: none;
+}
+
+.assumptions {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--ink-2);
+}
+
+.details-toggle {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.details-toggle summary {
+  cursor: pointer;
+}
+
+.question {
+  background: var(--info-bg);
+  color: var(--info);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-weight: 500;
+}
+
+.rule-delete {
+  margin-left: auto;
+  align-self: center;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+.rules li.has-delete {
+  grid-template-columns: 140px minmax(0, 1fr) auto;
+}
+
+.policy-foot {
+  color: var(--ink-3);
+  font-size: 12px;
 }

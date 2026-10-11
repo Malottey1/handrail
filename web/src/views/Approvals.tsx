@@ -70,6 +70,68 @@ export function ApprovalsView({ session, onChange }: { session: Session; onChang
   );
 }
 
+/**
+ * The AI-written brief. Shown below the rule that held the call, and labelled
+ * as advisory: the rules decided to hold it, and only the human decides.
+ */
+function AiBrief({ approval: a }: { approval: Approval }) {
+  const status = a.explanationStatus;
+  if (!status || status === "unavailable") return null;
+  return (
+    <section className="ai" aria-live="polite">
+      <header className="ai-head">
+        <span className="ai-label">
+          <span className="ai-spark" aria-hidden="true">
+            ✦
+          </span>
+          AI brief
+        </span>
+        <span className="ai-note" title={a.explanationModel ?? undefined}>
+          Advisory only. It can't approve anything.
+        </span>
+      </header>
+      {status === "pending" && (
+        <div className="ai-loading">
+          <span className="shimmer" />
+          <span className="shimmer short" />
+        </div>
+      )}
+      {status === "failed" && <p className="muted">Couldn't write a brief this time. The rule above is why it was held.</p>}
+      {status === "ready" && a.explanation && (
+        <>
+          <p className="ai-summary">{a.explanation.summary}</p>
+          {a.explanation.concerns.length > 0 && (
+            <div className="ai-concerns">
+              <p className="ai-sub">Watch out</p>
+              <ul>
+                {a.explanation.concerns.map((c, i) => (
+                  <li key={i}>{c}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {a.explanation.context.length > 0 && (
+            <>
+              <p className="ai-sub">Context</p>
+              <ul className="ai-list">
+                {a.explanation.context.map((c, i) => (
+                  <li key={i}>{c}</li>
+                ))}
+              </ul>
+            </>
+          )}
+          <p className="ai-sub">Check before approving</p>
+          <ul className="ai-checks">
+            {a.explanation.checkBeforeApproving.map((c, i) => (
+              <li key={i}>{c}</li>
+            ))}
+          </ul>
+        </>
+      )}
+    </section>
+  );
+}
+
 function ApprovalCard({ approval: a, session, now, onDecided }: { approval: Approval; session: Session; now: number; onDecided: () => void }) {
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
@@ -134,6 +196,8 @@ function ApprovalCard({ approval: a, session, now, onDecided }: { approval: Appr
           </div>
         )}
       </div>
+
+      <AiBrief approval={a} />
 
       <dl className="kv">
         {keyArgs(a.args).map(([k, v]) => (

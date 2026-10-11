@@ -15,7 +15,10 @@ const KIND_LABELS: Record<string, string> = {
   "approval.decided": "Human decided",
   "approval.completed": "Approved call finished",
   "approval.expired": "Approval expired",
+  "approval.explained": "AI brief written",
   "webhook.received": "Webhook received",
+  "policy.loaded": "Policy loaded",
+  "policy.changed": "Policy changed",
 };
 
 function summarize(e: AuditEntry): string {
@@ -35,6 +38,18 @@ function summarize(e: AuditEntry): string {
       return `status ${d.status}`;
     case "webhook.received":
       return `${d.eventType} → ${d.status}${d.callId ? ` (call #${d.callId})` : ""}`;
+    case "approval.explained":
+      return d.explanationStatus === "ready" ? `brief by ${d.model}: ${d.explanation?.summary ?? ""}` : `brief failed (${d.model})`;
+    case "policy.loaded":
+      return `${d.policy?.rules?.length ?? "?"} rules from ${d.path}`;
+    case "policy.changed": {
+      const parts = [
+        d.added?.length ? `added ${d.added.join(", ")}` : "",
+        d.removed?.length ? `removed ${d.removed.join(", ")}` : "",
+        d.changed?.length ? `changed ${d.changed.join(", ")}` : "",
+      ].filter(Boolean);
+      return `${parts.join("; ")} by ${d.by}${d.source ? `: “${d.source}”` : ""}`;
+    }
     case "chain.started":
       return `${d.toolCallsBefore} earlier calls predate the log`;
     default:
