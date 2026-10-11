@@ -93,13 +93,26 @@ ${policy.rules.map((r) => `- ${r.id}: ${ruleSentence(r)}`).join("\n") || "- none
 Defaults when no rule matches: read ${policy.defaults.read}, other changes ${policy.defaults.write}, money-moving ${policy.defaults.money}, unknown tools ${policy.defaults.unknown}.`;
 }
 
+const KIND_WORDS: Record<Rule["type"], string> = {
+  tool: "always-on rule",
+  amount_ceiling: "amount limit",
+  spend_limit: "spending limit",
+  rate_limit: "rate limit",
+  payee_allowlist: "payee allowlist",
+};
+
 /** Handrail's own notes on what a change does, computed from the rules. */
 export function proposalWarnings(current: Policy, add: Rule[], remove: string[]): string[] {
   const warnings: string[] = [];
+  const after = [...current.rules.filter((r) => !remove.includes(r.id)), ...add];
   for (const id of remove) {
     const rule = current.rules.find((r) => r.id === id);
-    if (rule && rule.decision !== "allow") {
-      warnings.push(`Removes a ${DECISION_WORDS[rule.decision].toLowerCase()} rule: “${ruleSentence(rule)}”.`);
+    if (!rule || rule.decision === "allow") continue;
+    warnings.push(`Removes a ${DECISION_WORDS[rule.decision].toLowerCase()} rule: “${ruleSentence(rule)}”.`);
+    // A replacement often covers fewer tools than the rule it replaces.
+    for (const tool of rule.tools) {
+      const stillCovered = after.some((r) => r.type === rule.type && r.decision !== "allow" && r.tools.includes(tool));
+      if (!stillCovered) warnings.push(`${toolLabel(tool)} will no longer have any ${KIND_WORDS[rule.type]}.`);
     }
   }
   for (const rule of add) {

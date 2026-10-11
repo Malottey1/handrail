@@ -150,6 +150,7 @@ describe("plain-English policy compilation", () => {
     });
     assert.deepEqual(proposal.policy.rules.map((r) => r.id), ["refund-hard-cap-1000", "refund-approval-over-250"]);
     assert.match(proposal.warnings[0]!, /Removes a needs approval rule/);
+    assert.equal(proposal.warnings.length, 1); // create_refund is still covered by the new rule
     assert.match(llm.requests[0]!.system, /refund-approval-over-100: Refund over 100\.00 USD → Needs approval/);
   });
 
@@ -179,6 +180,17 @@ describe("plain-English policy compilation", () => {
     const proposal = await compilePolicy("be careful with money", POLICY, fakeLlm({ question: "Which actions, and above what amount?", add: [], remove: [], assumptions: [] }));
     assert.equal(proposal.question, "Which actions, and above what amount?");
     assert.deepEqual(proposal.policy, POLICY);
+  });
+
+  it("warns when a replacement leaves a tool with no rule of that kind", async () => {
+    const both = parsePolicy({
+      ...POLICY,
+      rules: [{ ...POLICY.rules[0]!, tools: ["create_refund", "record_refund_for_invoice"] }, POLICY.rules[1]!],
+    });
+    const llm = fakeLlm({ question: null, add: [NEW_RULE], remove: ["refund-approval-over-100"], assumptions: [] });
+    const proposal = await compilePolicy("Raise the refund approval limit to $250", both, llm);
+    assert.ok(proposal.warnings.includes("Record invoice refund will no longer have any amount limit."));
+    assert.ok(!proposal.warnings.some((w) => w.startsWith("Refund will no longer")));
   });
 
   it("warns that allow rules can't loosen anything", async () => {
