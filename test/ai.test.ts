@@ -248,3 +248,24 @@ describe("policy store", () => {
     assert.deepEqual(policies.get().rules.map((r) => r.id), ["refund-approval-over-250"]);
   });
 });
+
+describe("structured output schema", () => {
+  it("rewrites the rule schema into the subset structured outputs accepts", async () => {
+    const { structuredSchema } = await import("../src/ai/llm.js");
+    const { z } = await import("zod");
+    const { ruleSchema } = await import("../src/policy/types.js");
+    const out = structuredSchema(z.toJSONSchema(ruleSchema)) as Record<string, any>;
+    const json = JSON.stringify(out);
+    assert.equal(out.oneOf, undefined);
+    assert.equal(out.anyOf.length, 5);
+    for (const banned of ["$schema", "minLength", "pattern", "exclusiveMinimum", "maximum"]) assert.ok(!json.includes(`"${banned}"`), banned);
+    for (const variant of out.anyOf) assert.equal(variant.additionalProperties, false);
+    assert.equal(out.anyOf[0].properties.tools.minItems, 1);
+    // A field literally named like a keyword survives.
+    assert.deepEqual(structuredSchema({ type: "object", properties: { pattern: { type: "string", pattern: "x" } } }), {
+      type: "object",
+      properties: { pattern: { type: "string" } },
+      additionalProperties: false,
+    });
+  });
+});

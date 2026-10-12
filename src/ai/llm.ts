@@ -21,6 +21,34 @@ export interface Llm {
 
 const TIMEOUT_MS = 45_000;
 
+/** Keywords structured outputs may reject. Callers validate with zod afterwards, so dropping them loses nothing. */
+const DROPPED = new Set(["$schema", "minLength", "maxLength", "pattern", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "maxItems"]);
+
+/**
+ * Rewrites a JSON Schema into the subset structured outputs accepts: anyOf
+ * instead of oneOf, closed objects, no length or range limits, minItems 0 or 1.
+ */
+export function structuredSchema(schema: unknown): unknown {
+  if (Array.isArray(schema)) return schema.map(structuredSchema);
+  if (schema === null || typeof schema !== "object") return schema;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(schema)) {
+    if (DROPPED.has(key)) continue;
+    if (key === "minItems") {
+      if (typeof value === "number" && value > 0) out.minItems = 1;
+      continue;
+    }
+    // Under "properties" the keys are field names, not keywords.
+    if (key === "properties" && value && typeof value === "object") {
+      out.properties = Object.fromEntries(Object.entries(value).map(([k, v]) => [k, structuredSchema(v)]));
+      continue;
+    }
+    out[key === "oneOf" ? "anyOf" : key] = structuredSchema(value);
+  }
+  if (out.type === "object" || "properties" in out) out.additionalProperties = false;
+  return out;
+}
+
 export class AnthropicLlm implements Llm {
   private readonly client: Anthropic;
 
@@ -31,18 +59,22 @@ export class AnthropicLlm implements Llm {
     this.client = new Anthropic({ apiKey, timeout: TIMEOUT_MS, maxRetries: 2 });
   }
 
-  /** Forces a single tool call whose input is the answer, so the reply is always JSON. */
+  /** Structured outputs: the reply's text is JSON matching the schema. */
   async json(request: Parameters<Llm["json"]>[0]): Promise<unknown> {
     const message = await this.client.messages.create({
       model: this.model,
       max_tokens: request.maxTokens ?? 2000,
-      system: request.system,
+      system: `${request.system}\n\nAnswer with the ${request.name} JSON object: ${request.description}`,
       messages: [{ role: "user", content: request.user }],
-      tools: [{ name: request.name, description: request.description, input_schema: request.schema as Anthropic.Tool.InputSchema }],
-      tool_choice: { type: "tool", name: request.name },
+      output_config: { format: { type: "json_schema", schema: structuredSchema(request.schema) as Record<string, unknown> } },
     });
-    const call = message.content.find((block) => block.type === "tool_use");
-    if (!call) throw new Error(`Model returned no ${request.name} answer (stop reason ${message.stop_reason})`);
-    return call.input;
+    const text = message.content
+      .filter((block) => block.type === "text")
+      .map((block) => block.text)
+      .join("");
+    if (message.stop_reason !== "end_turn" || !text) {
+      throw new Error(`Model returned no ${request.name} answer (stop reason ${message.stop_reason})`);
+    }
+    return JSON.parse(text);
   }
 }
