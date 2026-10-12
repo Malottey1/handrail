@@ -3,7 +3,7 @@ import { AgGridReact } from "ag-grid-react";
 import { useMemo, useState } from "react";
 import { api, type AuditEntry, type CallRow, type RuleHit, type Session } from "../api";
 import { DecisionPill, Drawer, JsonBlock, Mono, Pill, StatusPill, usePoll } from "../components";
-import { callAmount, formatMoney, formatTime, parseJson, paypalSummary, toolLabel } from "../format";
+import { callAmount, callDecision, formatMoney, formatTime, parseJson, paypalSummary, toolLabel } from "../format";
 import { useGridTheme } from "../grid";
 
 export function ActivityView({ session }: { session: Session }) {
@@ -25,7 +25,13 @@ export function ActivityView({ session }: { session: Session }) {
         valueGetter: (p) => (p.data ? callAmount(p.data)?.hundredths ?? null : null),
         valueFormatter: (p) => (p.data ? formatMoney(callAmount(p.data)) : ""),
       },
-      { headerName: "Decision", field: "decision", width: 150, cellRenderer: (p: { value: string }) => <DecisionPill decision={p.value} /> },
+      {
+        headerName: "Decision",
+        colId: "decision",
+        width: 160,
+        valueGetter: (p) => (p.data ? callDecision(p.data) : ""),
+        cellRenderer: (p: { value: string }) => <DecisionPill decision={p.value} />,
+      },
       { headerName: "Outcome", field: "outcome", width: 135, cellRenderer: (p: { value: string | null }) => <StatusPill status={p.value} /> },
       {
         headerName: "PayPal said",
@@ -79,7 +85,7 @@ function CallDrawer({ call, session, onClose }: { call: CallRow; session: Sessio
       onClose={onClose}
     >
       <div className="detail-pills">
-        <DecisionPill decision={call.decision} />
+        <DecisionPill decision={callDecision(call)} />
         <StatusPill status={call.outcome} />
         {call.forwarded ? <Pill tone="info">Sent to PayPal</Pill> : <Pill tone="muted">Not sent to PayPal</Pill>}
       </div>

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 
 const DECISION_LABELS: Record<string, [string, string]> = {
   allow: ["Allowed", "good"],
+  approved: ["Approved by human", "good"],
   require_approval: ["Needs approval", "warn"],
   block: ["Blocked", "bad"],
   duplicate: ["Duplicate", "info"],

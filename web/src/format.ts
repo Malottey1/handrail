@@ -15,6 +15,11 @@ export function callAmount(row: CallRow): Money | null {
   return row.amount_hundredths !== null && row.currency ? { hundredths: row.amount_hundredths, currency: row.currency } : null;
 }
 
+/** A held call that a human approved is recorded as "allow" with its approval id; show it as approved. */
+export function callDecision(row: CallRow): string {
+  return row.decision === "allow" && row.approval_id ? "approved" : row.decision;
+}
+
 export function formatTime(iso: string): string {
   const d = new Date(iso);
   const sameDay = d.toDateString() === new Date().toDateString();
