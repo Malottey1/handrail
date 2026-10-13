@@ -134,8 +134,8 @@ function Dashboard({ session, onSignOut, onUserChange }: { session: Session; onS
 
       {session.user.isDemo && (
         <div className="banner banner-demo">
-          You're using the shared demo account (approver) on PayPal's sandbox. No real money moves. Decisions are recorded as "Demo
-          Approver".
+          You're in your own demo workspace on PayPal's sandbox, signed in as an approver. No real money moves, and nobody else sees
+          what you do here. Start with "Run demo agent" below.
         </div>
       )}
       {summary.error && !(summary.error instanceof ApiError && summary.error.status === 401) && (

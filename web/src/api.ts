@@ -219,3 +219,22 @@ export interface PolicyProposal {
   baseHash: string;
   model: string;
 }
+
+export type DemoStepStatus = "waiting" | "running" | "done" | "unexpected" | "failed";
+
+export interface DemoStatus {
+  run: {
+    id: string;
+    startedAt: number;
+    finishedAt: number | null;
+    status: "running" | "done" | "failed";
+    error: string | null;
+    plan: { limit: string; ruleId: string; small: string; large: string; sale: string };
+    captureId: string | null;
+    steps: Array<{ id: string; title: string; expect: string; status: DemoStepStatus; outcome: string | null }>;
+  } | null;
+  /** The held refund from the latest run, live. */
+  approval: { id: string; status: ApprovalStatus; decidedBy: string | null } | null;
+  nextRunInSeconds: number;
+  resetsAfterMinutes: number;
+}

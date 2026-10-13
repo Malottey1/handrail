@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api, ApiError, can, type Approval, type Session } from "../api";
 import { DecisionPill, Empty, Mono, Pill, StatusPill, useNow, usePoll } from "../components";
 import { countdown, formatMoney, paypalSummary, timeAgo, toolLabel } from "../format";
+import { DemoAgentPanel } from "./DemoAgent";
 
 /** The arguments worth showing on a card, most identifying first. */
 const KEY_ARGS = ["capture_id", "id", "order_id", "dispute_id", "invoice_id", "subscription_id", "note_to_payer", "reason", "note"];
@@ -19,26 +20,44 @@ export function ApprovalsView({ session, onChange }: { session: Session; onChang
   const pending = usePoll(() => api<Approval[]>(session, "/approvals?status=pending"), 2000);
   const all = usePoll(() => api<Approval[]>(session, "/approvals"), 5000);
   const now = useNow();
+  // Cards the user is deciding stay on screen until their result has been shown,
+  // even though the next poll no longer lists them as pending.
+  const [deciding, setDeciding] = useState<Approval[]>([]);
 
   const refresh = () => {
     pending.refresh();
     all.refresh();
     onChange();
   };
+  const cards = [...(pending.data ?? [])];
+  for (const a of deciding) if (!cards.some((c) => c.id === a.id)) cards.push(a);
   const decided = (all.data ?? []).filter((a) => a.status !== "pending").slice(0, 15);
 
   return (
     <div className="approvals">
+      {session.user.isDemo && <DemoAgentPanel session={session} onActivity={refresh} />}
       <section>
         <h2 className="section-title">
           Waiting for you <span className="count">{pending.data?.length ?? 0}</span>
         </h2>
         {pending.error && <p className="error">{pending.error.message}</p>}
-        {pending.data && pending.data.length === 0 && (
+        {pending.data && cards.length === 0 && (
           <Empty title="Nothing to review">Calls that a policy holds for a human will appear here as they happen.</Empty>
         )}
         <div className="cards">
-          {pending.data?.map((a) => <ApprovalCard key={a.id} approval={a} session={session} now={now} onDecided={refresh} />)}
+          {cards.map((a) => (
+            <ApprovalCard
+              key={a.id}
+              approval={a}
+              session={session}
+              now={now}
+              onDeciding={() => setDeciding((d) => [...d, a])}
+              onDecided={() => {
+                setDeciding((d) => d.filter((x) => x.id !== a.id));
+                refresh();
+              }}
+            />
+          ))}
         </div>
       </section>
 
@@ -140,12 +159,25 @@ function AiBrief({ approval: a }: { approval: Approval }) {
   );
 }
 
-function ApprovalCard({ approval: a, session, now, onDecided }: { approval: Approval; session: Session; now: number; onDecided: () => void }) {
+function ApprovalCard({
+  approval: a,
+  session,
+  now,
+  onDeciding,
+  onDecided,
+}: {
+  approval: Approval;
+  session: Session;
+  now: number;
+  onDeciding: () => void;
+  onDecided: () => void;
+}) {
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
   const [outcome, setOutcome] = useState<{ tone: string; text: string } | null>(null);
 
   async function decide(action: "approve" | "reject") {
+    onDeciding();
     setBusy(action);
     setOutcome(null);
     try {
@@ -164,7 +196,7 @@ function ApprovalCard({ approval: a, session, now, onDecided }: { approval: Appr
       setTimeout(onDecided, 2500);
     } catch (err) {
       setOutcome({ tone: "bad", text: err instanceof ApiError ? err.message : String(err) });
-      if (err instanceof ApiError && err.status === 409) setTimeout(onDecided, 2500);
+      setTimeout(onDecided, 2500); // still pending (it stays listed) or decided elsewhere (409: it goes)
     } finally {
       setBusy(null);
     }
