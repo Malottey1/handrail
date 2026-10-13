@@ -25,7 +25,9 @@
     "check:drop-in": "node --disable-warning=ExperimentalWarning --import tsx scripts/drop-in-check.ts",
     "audit:verify": "node --disable-warning=ExperimentalWarning --import tsx scripts/audit-verify.ts",
     "dev:web": "vite --config web/vite.config.ts",
-    "build:web": "vite build --config web/vite.config.ts"
+    "build:web": "vite build --config web/vite.config.ts",
+    "check:secrets": "node scripts/check-secrets.mjs --all",
+    "prepare": "git config core.hooksPath .githooks 2>/dev/null || true"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",
