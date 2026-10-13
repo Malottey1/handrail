@@ -22,6 +22,7 @@
     "demo:approval": "node --disable-warning=ExperimentalWarning --import tsx scripts/approval-demo.ts",
     "demo:retry-storm": "node --disable-warning=ExperimentalWarning --import tsx scripts/retry-storm.ts",
     "sandbox:capture": "node --disable-warning=ExperimentalWarning --import tsx scripts/sandbox-capture.ts",
+    "check:drop-in": "node --disable-warning=ExperimentalWarning --import tsx scripts/drop-in-check.ts",
     "audit:verify": "node --disable-warning=ExperimentalWarning --import tsx scripts/audit-verify.ts",
     "dev:web": "vite --config web/vite.config.ts",
     "build:web": "vite build --config web/vite.config.ts"

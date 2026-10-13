@@ -1,6 +1,12 @@
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import {
+  CallToolRequestSchema,
+  ListResourcesRequestSchema,
+  ListResourceTemplatesRequestSchema,
+  ListToolsRequestSchema,
+  ReadResourceRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 import { GET_APPROVAL_TOOL, type Gate } from "./gate.js";
 import { IDEMPOTENCY_ARG } from "./idempotency.js";
 import { classifyTool } from "./policy/classify.js";
@@ -13,12 +19,21 @@ const IDEMPOTENCY_PROPERTY = {
 };
 
 /**
- * Builds the agent-facing MCP server. It exposes PayPal's tools, with an
- * optional idempotency_key on every non-read tool, plus handrail_get_approval,
- * and sends every call through the gate.
+ * Builds the agent-facing MCP server. It presents itself as the upstream
+ * server (same name, capabilities, instructions, resources and tools), so an
+ * existing Agent Toolkit agent works unchanged. The only additions are an
+ * optional idempotency_key on every non-read tool and handrail_get_approval
+ * (see src/tool-parity.ts). Every tool call goes through the gate.
  */
 export function createProxyServer(upstream: Client, gate: Gate): Server {
-  const server = new Server({ name: "handrail", version: "0.1.0" }, { capabilities: { tools: {} } });
+  const upstreamCaps = upstream.getServerCapabilities() ?? {};
+  const server = new Server(upstream.getServerVersion() ?? { name: "handrail", version: "0.1.0" }, {
+    capabilities: {
+      tools: upstreamCaps.tools ?? {},
+      ...(upstreamCaps.resources ? { resources: upstreamCaps.resources } : {}),
+    },
+    instructions: upstream.getInstructions(),
+  });
 
   server.setRequestHandler(ListToolsRequestSchema, async (request) => {
     const result = await upstream.listTools(request.params);
@@ -33,6 +48,13 @@ export function createProxyServer(upstream: Client, gate: Gate): Server {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     return gate.handle(request.params.name, request.params.arguments ?? {});
   });
+
+  // Read-only, so passed straight through.
+  if (upstreamCaps.resources) {
+    server.setRequestHandler(ListResourcesRequestSchema, (request) => upstream.listResources(request.params));
+    server.setRequestHandler(ListResourceTemplatesRequestSchema, (request) => upstream.listResourceTemplates(request.params));
+    server.setRequestHandler(ReadResourceRequestSchema, (request) => upstream.readResource(request.params));
+  }
 
   return server;
 }
