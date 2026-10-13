@@ -1,12 +1,11 @@
 :root {
-  /* Brand, from the logo (web/public/handrail-logo.png). PROVISIONAL until
-     sampled from the logo file: re-sample and update --brand and its shades. */
-  --brand: #2f7a46;
-  --brand-hover: #24603a; /* hover and pressed */
-  --brand-tint: #e8f2eb; /* backgrounds, selected rows */
-  --brand-tint-2: #d3e7d9;
+  /* Brand: #127842 is sampled from the logo (web/public/handrail-logo.png). */
+  --brand: #127842;
+  --brand-hover: #0d5f33; /* hover and pressed */
+  --brand-tint: #e6f2ea; /* backgrounds, selected rows */
+  --brand-tint-2: #cce5d5;
   --on-brand: #ffffff;
-  --focus: #2f7a46;
+  --focus: #127842;
 
   /* Neutrals */
   --white: #ffffff;
@@ -52,12 +51,12 @@
 }
 
 :root[data-theme="dark"] {
-  --brand: #6cc287;
-  --brand-hover: #8ad3a1;
-  --brand-tint: #1d2a21;
-  --brand-tint-2: #233a2a;
+  --brand: #64c48a;
+  --brand-hover: #85d3a5;
+  --brand-tint: #1a2b20;
+  --brand-tint-2: #1f3b29;
   --on-brand: #0d130f;
-  --focus: #8ad3a1;
+  --focus: #85d3a5;
 
   --bg: #0f1311;
   --surface: #151a17;

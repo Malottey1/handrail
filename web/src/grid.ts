@@ -37,27 +37,27 @@ const base = themeQuartz.withParams({
 });
 
 const light = base.withPart(colorSchemeLight).withParams({
-  accentColor: "#2f7a46",
+  accentColor: "#127842",
   backgroundColor: "#ffffff",
   foregroundColor: "#1b211d",
   borderColor: "#dfe4e0",
   headerBackgroundColor: "#f5f7f5",
   headerTextColor: "#4b554e",
-  rowHoverColor: "#f0f6f1",
-  selectedRowBackgroundColor: "#e3efe6",
-  inputFocusBorder: { color: "#2f7a46" },
+  rowHoverColor: "#eef6f1",
+  selectedRowBackgroundColor: "#e0efe5",
+  inputFocusBorder: { color: "#127842" },
 });
 
 const dark = base.withPart(colorSchemeDark).withParams({
-  accentColor: "#6cc287",
+  accentColor: "#64c48a",
   backgroundColor: "#151a17",
   foregroundColor: "#e5ebe6",
   borderColor: "#2a332d",
   headerBackgroundColor: "#1b211d",
   headerTextColor: "#b4beb6",
-  rowHoverColor: "#1d2a21",
-  selectedRowBackgroundColor: "#203527",
-  inputFocusBorder: { color: "#6cc287" },
+  rowHoverColor: "#1a2b20",
+  selectedRowBackgroundColor: "#1e3627",
+  inputFocusBorder: { color: "#64c48a" },
 });
 
 /** AG Grid theme that follows Handrail's light/dark setting. */

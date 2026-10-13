@@ -127,8 +127,8 @@ export function usePoll<T>(load: () => Promise<T>, intervalMs: number, key = "")
 }
 
 /**
- * The Handrail logo (web/public/handrail-logo.png). Until that file is added,
- * a simple mark in the brand green stands in.
+ * The Handrail logo (web/public/handrail-logo.png). If it fails to load, a
+ * simple mark in the brand green stands in.
  */
 export function Logo({ size = 28, className = "logo" }: { size?: number; className?: string }) {
   const [missing, setMissing] = useState(false);
