@@ -1,0 +1,15 @@
+{
+  "name": "handrail-example-ai-sdk",
+  "private": true,
+  "type": "module",
+  "description": "PayPal's official ai-sdk example, switched to Handrail. See ../../README section 'Or use it from the Vercel AI SDK or LangChain JS'.",
+  "scripts": { "start": "tsx index.ts", "try-refunds": "tsx try-refunds.ts" },
+  "dependencies": {
+    "@dotenvx/dotenvx": "^1.32.0",
+    "@ai-sdk/openai": "^1.3.0",
+    "ai": "^4.3.19",
+    "handrail-ai-sdk": "file:../../../packages/typescript/handrail-ai-sdk",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": { "tsx": "^4.19.2", "@types/node": "^22.10.5" }
+}

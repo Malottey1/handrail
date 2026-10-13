@@ -1,0 +1,23 @@
+{
+  "name": "handrail-typescript-packages",
+  "private": true,
+  "description": "Workspace for handrail-ai-sdk and handrail-langchain. Not published.",
+  "type": "module",
+  "workspaces": ["handrail-ai-sdk", "handrail-langchain"],
+  "scripts": {
+    "snapshot": "node --disable-warning=ExperimentalWarning --import tsx scripts/snapshot-tools.ts",
+    "build": "npm run build -w handrail-ai-sdk -w handrail-langchain",
+    "typecheck": "tsc --noEmit -p .",
+    "test": "node --disable-warning=ExperimentalWarning --import tsx --test test/*.test.ts"
+  },
+  "devDependencies": {
+    "@langchain/core": "^0.3.80",
+    "@langchain/langgraph": "^0.3.0",
+    "@types/node": "^22.10.5",
+    "ai": "^4.3.19",
+    "tsup": "^8.3.6",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "zod": "^3.24.2"
+  }
+}

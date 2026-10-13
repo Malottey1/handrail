@@ -39,3 +39,8 @@ __pycache__/
 .venv/
 venv/
 .pytest_cache/
+
+# The TypeScript wrappers ship built code, so installs from GitHub need no build step
+!packages/typescript/handrail-ai-sdk/dist/
+!packages/typescript/handrail-langchain/dist/
+examples/**/package-lock.json

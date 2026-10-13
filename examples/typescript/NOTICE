@@ -1,0 +1,9 @@
+ai-sdk/paypal-index.ts and langchain/paypal-index.ts are PayPal's official examples,
+copied unchanged from https://github.com/paypal/agent-toolkit/tree/main/typescript/examples
+(commit a3aa963). Copyright PayPal, licensed under the Apache License 2.0:
+https://www.apache.org/licenses/LICENSE-2.0
+
+The index.ts files next to them are those examples, modified: they use Handrail's
+wrappers instead of PayPal credentials, and ask for two refunds.
+handrail-ai-sdk's HandrailWorkflows is ported from typescript/src/ai-sdk/workflows.ts
+in the same repository, under the same license.

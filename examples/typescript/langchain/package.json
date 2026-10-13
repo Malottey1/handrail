@@ -1,0 +1,16 @@
+{
+  "name": "handrail-example-langchain",
+  "private": true,
+  "type": "module",
+  "description": "PayPal's official langchain example, switched to Handrail. See ../../README section 'Or use it from the Vercel AI SDK or LangChain JS'.",
+  "scripts": { "start": "tsx index.ts" },
+  "dependencies": {
+    "@dotenvx/dotenvx": "^1.32.0",
+    "@langchain/core": "^0.3.80",
+    "@langchain/langgraph": "^0.3.0",
+    "@langchain/openai": "^0.5.0",
+    "handrail-langchain": "file:../../../packages/typescript/handrail-langchain",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": { "tsx": "^4.19.2", "@types/node": "^22.10.5" }
+}

@@ -220,6 +220,107 @@ Run `try_refunds.py` in the same folder to see the two refunds without an LLM. A
 150.00 USD: pending_approval (approval apr_…). Approve it in Handrail's dashboard.
 ```
 
+### Or use it from the Vercel AI SDK or LangChain JS (TypeScript)
+
+[`packages/typescript`](packages/typescript) has drop-in replacements for `@paypal/agent-toolkit/ai-sdk` and `/langchain`: `handrail-ai-sdk` and `handrail-langchain`. They have the same synchronous constructor, `getTools()`, `ALL_TOOLS_ENABLED` and, for the AI SDK, workflows. They hold only an agent key and call Handrail's tool-call API. Installation and details: [packages/typescript/README.md](packages/typescript/README.md).
+
+PayPal's official examples ([`examples/typescript`](examples/typescript)) switched to Handrail. The import, the two config lines and the constructor are the switch; the prompt change makes the example demonstrate an allowed refund and a held one:
+
+```diff
+--- ai-sdk/paypal-index.ts (PayPal's example)
++++ ai-sdk/index.ts (through Handrail)
+@@ -1,7 +1,7 @@
+ import {config} from '@dotenvx/dotenvx';
+ import {openai} from '@ai-sdk/openai';
+ import {generateText} from 'ai';
+-import {PayPalWorkflows, PayPalAgentToolkit, ALL_TOOLS_ENABLED} from '@paypal/agent-toolkit/ai-sdk';
++import {HandrailWorkflows, HandrailAgentToolkit, ALL_TOOLS_ENABLED} from 'handrail-ai-sdk';
+ 
+ // Get the env file path from an environment variable, with a default fallback
+ const envFilePath = process.env.ENV_FILE_PATH || '.env';
+@@ -12,8 +12,8 @@
+  */
+ 
+ const ppConfig = {
+-    clientId: process.env.PAYPAL_CLIENT_ID || '',
+-    clientSecret: process.env.PAYPAL_CLIENT_SECRET || '',
++    url: process.env.HANDRAIL_URL || '',
++    agentKey: process.env.HANDRAIL_AGENT_KEY || '',
+     configuration: {
+         actions: ALL_TOOLS_ENABLED
+     }
+@@ -21,11 +21,11 @@
+ /*
+  * This holds all the tools that use PayPal functionality
+  */
+-const paypalToolkit = new PayPalAgentToolkit(ppConfig);
++const paypalToolkit = new HandrailAgentToolkit(ppConfig);
+ /*
+  * This holds all the preconfigured common PayPal workflows
+  */
+-const paypalWorkflows = new PayPalWorkflows(ppConfig)
++const paypalWorkflows = new HandrailWorkflows(ppConfig)
+ 
+ /*
+  * This is the merchant's typical use case. This stays the same for most requests.
+@@ -50,7 +50,7 @@
+         model: openai('gpt-4o'),
+         tools: paypalToolkit.getTools(),
+         maxSteps: 10,
+-        prompt: "Retrieve the details of the order with ID: 4A572180UY881681N",
++        prompt: `Refund $5.00 of PayPal capture ${process.env.CAPTURE_ID}: the item arrived damaged. Then refund $150.00 of the same capture for a missing order. Report what happened to each refund.`,
+     });
+     console.log(orderDetails)
+ })();
+```
+
+```diff
+--- langchain/paypal-index.ts (PayPal's example)
++++ langchain/index.ts (through Handrail)
+@@ -1,6 +1,6 @@
+ import { config } from '@dotenvx/dotenvx';
+ import { ChatOpenAI } from '@langchain/openai';
+-import { PayPalAgentToolkit, ALL_TOOLS_ENABLED} from '@paypal/agent-toolkit/langchain';
++import { HandrailAgentToolkit, ALL_TOOLS_ENABLED} from 'handrail-langchain';
+ import { createReactAgent } from '@langchain/langgraph/prebuilt';
+ 
+ const envFilePath = process.env.ENV_FILE_PATH || '.env';
+@@ -12,14 +12,14 @@
+   });
+ 
+ const ppConfig = {
+-    clientId: process.env.PAYPAL_CLIENT_ID || '',
+-    clientSecret: process.env.PAYPAL_CLIENT_SECRET || '',
++    url: process.env.HANDRAIL_URL || '',
++    agentKey: process.env.HANDRAIL_AGENT_KEY || '',
+     configuration: {
+         actions: ALL_TOOLS_ENABLED
+     }
+ }
+ 
+-const paypalToolkit = new PayPalAgentToolkit(ppConfig);
++const paypalToolkit = new HandrailAgentToolkit(ppConfig);
+ let tools = paypalToolkit.getTools();
+ 
+ (async () => {
+@@ -32,7 +32,7 @@
+         {
+             messages: [{
+                 role: "user",
+-                content: "Create an PayPal order for $50 for Premium News service."
++                content: `Refund $5.00 of PayPal capture ${process.env.CAPTURE_ID}: the item arrived damaged. Then refund $150.00 of the same capture for a missing order. Report what happened to each refund.`
+             }]
+         }
+     );
+```
+
+`npm run try-refunds` in `examples/typescript/ai-sdk` runs the two refunds without an LLM. Against the sandbox it printed:
+
+```
+5.00 USD: sent to PayPal: refund … is COMPLETED
+150.00 USD: pending_approval (approval apr_…). Approve it in Handrail's dashboard.
+```
+
 ### Try the demos
 
 ```bash
