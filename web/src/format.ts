@@ -65,7 +65,7 @@ const HANDRAIL_STATUS: Record<string, string> = {
   rejected: "Not sent: rejected by a human",
 };
 
-/** One line describing what PayPal said, e.g. "COMPLETED · 9JV16611T18836942". */
+/** One line describing what PayPal said, e.g. "COMPLETED · 0AB12345CD6789012". */
 export function paypalSummary(result: unknown): string {
   const handrail = (result as { handrail?: { status?: string; message?: string } } | null)?.handrail;
   if (handrail) return handrail.message ?? HANDRAIL_STATUS[handrail.status ?? ""] ?? handrail.status ?? "";

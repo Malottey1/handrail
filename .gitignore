@@ -8,6 +8,11 @@ dist/
 .env
 .env.*
 !.env.example
+.envrc
+*.pem
+*.key
+*.p12
+*.pfx
 
 # Databases
 *.db
