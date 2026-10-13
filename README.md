@@ -4,6 +4,12 @@
 
 Built for PayPal's *Build What's Next with PayPal and AI* hackathon. Sandbox only.
 
+## Try the demo
+
+Open the hosted sandbox deployment (the link is on the Devpost page) and click **Try the demo**, on the homepage or the sign-in page. It signs you in as **Demo Approver**, a shared account with the *approver* role, on PayPal's sandbox: you can approve or reject held calls and look at everything, but you can't change the policy, people or keys. No real money moves.
+
+To run the same thing yourself, set `HANDRAIL_DEMO_ACCESS=true` (see [Run it](#run-it)). The demo account is created when Handrail starts, has a random password nobody knows, can only be entered through the button, and can't change its own name, email or password. Its decisions are recorded as "Demo Approver" like anyone else's.
+
 ## The problem
 
 An agent connected to PayPal's toolkit can issue refunds, concede disputes, cancel invoices and subscriptions, and capture payments, and nothing checks the call first:
@@ -36,7 +42,8 @@ flowchart LR
 | **Idempotency** (`src/idempotency.ts`) | Every money call maps to one *operation*: the agent's `idempotency_key`, or a hash of the tool and its arguments within an hour. Repeats are answered from the record without contacting PayPal. `create_refund` and `pay_order` go straight to PayPal's REST API with a per-operation `PayPal-Request-Id`, so even a retry after a timeout can't duplicate the payment. |
 | **Audit log** (`src/audit-chain.ts`) | Every decision, approval, result, webhook and policy change is an entry whose SHA-256 hash covers the previous one. It is written in the same SQLite transaction as the change it describes. Database triggers reject edits, and `verify()` recomputes the chain and replays it against the working tables, so editing either is detected. |
 | **Webhooks** (`src/webhooks.ts`) | `POST /webhooks/paypal` verifies PayPal's signature and matches each event to the agent call that caused it. Mismatched amounts, and refunds or cancellations that no agent call explains, are flagged. |
-| **Dashboard** (`web/`) | React and AG Grid: approval cards, an activity grid, webhook matches, the audit log with a live integrity badge, and the policy editor. |
+| **People and agent keys** (`src/auth/`) | Everyone signs in with their own account. *Admins* manage the policy, people and agent keys; *approvers* approve or reject held calls; *viewers* read. Roles are checked on every API request, not just hidden in the UI. Each approval records who made it ("Approved by Malcolm Clottey"), and every agent call records which agent key made it. |
+| **Dashboard** (`web/`) | React and AG Grid: approval cards, an activity grid, webhook matches, the audit log with a live integrity badge, the policy editor, and team and key management. |
 
 ### Where AI is used, and where it isn't
 
@@ -56,11 +63,21 @@ npm run build:web
 npm run dev               # Handrail, dashboard and admin API on http://127.0.0.1:8787
 ```
 
+Open http://127.0.0.1:8787 and click **Set up Handrail**: the first account becomes the admin. Invite everyone else from **Team & keys**; each invite link works once, for one email, with the role you chose.
+
+**Security:**
+- Passwords are hashed with Argon2id.
+- Sessions live in httpOnly, SameSite=Strict cookies. They are also Secure, except on plain-HTTP localhost.
+- Every change made with a session needs a per-session CSRF token. Cross-site requests are refused.
+- Failed logins are rate-limited.
+
 | Variable | Needed for |
 | --- | --- |
 | `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | Everything. Sandbox credentials only. |
-| `HANDRAIL_ADMIN_TOKEN` | Signing in to the dashboard and admin API (`openssl rand -hex 32`). |
-| `HANDRAIL_AGENT_TOKEN` | Agents connecting over HTTP at `/mcp`. Agents using stdio don't need it. |
+| `HANDRAIL_ADMIN_TOKEN` | Optional. A bearer token for terminal scripts (`npm run approvals`, the demos); it acts as an admin. People use their own accounts. |
+| `HANDRAIL_AGENT_TOKEN` | Optional. One extra agent key from `.env`. Normally an admin creates agent keys in the dashboard. |
+| `HANDRAIL_DEMO_ACCESS` | Optional. `true` turns on **Try the demo** (a shared approver account). For sandbox demos only. |
+| `HANDRAIL_TRUST_PROXY` | Set to `true` behind a proxy such as Render, so client IPs (for login rate limits) and HTTPS are detected. |
 | `PAYPAL_WEBHOOK_ID` | Receiving webhooks. Register a URL ending in `/webhooks/paypal`. |
 | `ANTHROPIC_API_KEY` | The AI brief and the plain-English policy. Optional. |
 | `HANDRAIL_AI_MODEL` | Optional. Defaults to `claude-opus-5-5`. `claude-sonnet-5-5` is faster. |
@@ -80,7 +97,7 @@ Point any MCP client at Handrail instead of PayPal. Over stdio:
 }
 ```
 
-Or over HTTP: `POST http://127.0.0.1:8787/mcp` with `Authorization: Bearer $HANDRAIL_AGENT_TOKEN`.
+Or over HTTP: an admin creates an agent key in **Team & keys**. The key is shown once; Handrail stores only its hash. The agent then sends `POST http://127.0.0.1:8787/mcp` with `Authorization: Bearer <key>`. Calls without a valid key are refused, and revoking a key cuts its agent off immediately.
 
 ### Try the demos
 

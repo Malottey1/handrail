@@ -30,8 +30,9 @@ Money-out tools to guard: `create_refund`, `accept_dispute_claim`, `cancel_sent_
 - **Idempotency manager**: assigns a stable PayPal-Request-Id per logical operation so retries never duplicate.
 - **Audit log**: SQLite, tamper-evident (hash chain), recording request, decision, reason, and PayPal response.
 - **Webhook endpoint**: receives PayPal events (refund completed, invoice paid, dispute updated), matches them to the original agent request, and flags mismatches.
-- **REST API for the dashboard**: audit log, policies, pending approvals.
-- **React dashboard**: plain-English policy editor (AI compiles English into structured rules; the user confirms), approval queue with live updates, audit log grid using AG Grid.
+- **REST API for the dashboard**: audit log, policies, pending approvals, people, invites, agent keys. Roles enforced server-side on every route.
+- **React dashboard**: public homepage at `/`, sign-in/sign-up, and the dashboard at `/app`: plain-English policy editor (AI compiles English into structured rules; the user confirms), approval queue with live updates, audit log grid using AG Grid, team and agent-key management.
+- **Users and agent keys**: admin / approver / viewer accounts; agents authenticate to `/mcp` with keys admins create.
 - **AI usage**: compiling plain-English rules into structured policy and explaining flagged decisions. Enforcement is always deterministic code.
 
 ## Stack
@@ -49,7 +50,16 @@ TypeScript, Node.js, the official MCP TypeScript SDK (Handrail is an MCP server 
 - Webhooks (`src/webhooks.ts`, `src/webhook-endpoint.ts`): `POST /webhooks/paypal` verifies via `/v1/notifications/verify-webhook-signature`, stores each event once, and matches it to the forwarded agent call. Statuses: matched, mismatch (amount differs, or Handrail recorded failed/unknown), outside_handrail (refund or invoice cancellation with no agent call), unrelated, ignored. `GET /api/webhooks`.
 - Verified end to end against the sandbox (Oct 10, 2026): a real capture via `pay_order`, then a 10-call retry storm on it gave one $5 refund at PayPal. Both webhooks (`PAYMENT.CAPTURE.COMPLETED`, `PAYMENT.CAPTURE.REFUNDED`) arrived signed, verified, and matched their calls. The registered webhook URL must end in `/webhooks/paypal`. PayPal can resend past events via `POST /v1/notifications/webhooks-events/{id}/resend`.
 - Audit log (`src/audit-chain.ts`): every write to tool_calls, approvals and webhook_events appends an `audit_chain` entry in the same `BEGIN IMMEDIATE` transaction. `hash = sha256(prev_hash, seq, at, kind, ref, data_json)`; triggers reject UPDATE/DELETE. `verify()` recomputes the chain and replays it against the working tables, so edits to either are caught. The first entry (`chain.started`, written at boot) snapshots rows that predate the chain. `GET /api/audit`, `GET /api/audit/verify`. Truncating the newest entries is only detectable against a head hash noted elsewhere.
-- HTTP `/mcp` requires `HANDRAIL_AGENT_TOKEN` (disabled without it) because a tunnel would otherwise expose it. Tokens must be >= 24 chars.
+- Auth (`src/auth/`, `src/admin-api.ts`, `test/auth.test.ts`):
+  - Accounts: Argon2id via `@node-rs/argon2` (prebuilt binaries; fine on Node 23.4). Sessions are random 256-bit tokens in an httpOnly, SameSite=Strict cookie (`handrail_session`), stored as SHA-256 in `sessions`, 7 days. `Secure` unless plain HTTP on localhost (`HANDRAIL_COOKIE_SECURE`).
+  - CSRF: synchronizer token per session, sent as `X-CSRF-Token` on every cookie-authenticated change; any state-changing `/api` request whose Origin/Referer host differs from Host is refused (covers login CSRF too).
+  - Login limits (in memory): 5 failures per IP+email and 30 per IP per 15 min; unknown emails still run an Argon2 verify.
+  - Roles: admin > approver > viewer, checked per route in `createAdminApi`. The first non-demo sign-up becomes admin inside a `BEGIN IMMEDIATE` transaction; later sign-ups need an invite (one use, one email, 7 days, stored hashed). An admin can't change their own role, and the last active admin can't be demoted or disabled.
+  - `HANDRAIL_ADMIN_TOKEN` still works as a bearer token for scripts (acts as admin, recorded as "<by> (admin token)").
+  - Approvals record `decided_by` (name) and `decided_by_id`; policy changes record `byId`. User, invite and agent-key changes are audit-chain entries (never password hashes or key material).
+  - Agent keys (`hr_agent_…`): shown once, stored as SHA-256, revocable. `/mcp` (`src/mcp-endpoint.ts`) refuses calls without a valid key (or `HANDRAIL_AGENT_TOKEN`); every call, duplicate and approval records the agent (`agent_key_id`, `agent_name`), and stdio calls are recorded as "Local agent (stdio)".
+  - Demo: `HANDRAIL_DEMO_ACCESS=true` seeds "Demo Approver" (approver, random unusable password) and enables `POST /api/auth/demo`. It can't sign in with a password, change its profile or password, or become admin.
+- Branding: tokens in `web/src/styles.css` (`--brand`, `--brand-hover`, `--brand-tint`, neutrals; status colours separate: allowed/succeeded teal, held amber, blocked/rejected red, webhook mismatch magenta, AI indigo). Light by default, dark via `data-theme="dark"` (toggle, stored in localStorage); AG Grid themes in `web/src/grid.ts` use the same values. The brand green `#2f7a46` is PROVISIONAL: `web/public/handrail-logo.png` wasn't in the repo yet, so it couldn't be sampled; the `Logo` component falls back to an SVG mark until the file exists.
 - Dashboard: polls the admin API (approvals 2s, summary 3s, audit verify 10s); no websockets. Registers only the AG Grid modules it uses. Grid containers need an explicit height (a flex-grown height collapses the grid to 0).
 - AI (`src/ai/`), advisory only and off without `ANTHROPIC_API_KEY` (model `HANDRAIL_AI_MODEL`, default `claude-opus-5-5`). Structured output via `output_config.format` (Opus 5.5 rejects forced `tool_choice`); `structuredSchema` strips keywords it may not accept (oneOf → anyOf, length/range/pattern limits), and every answer is still validated with zod. Verified with real Claude (Oct 12): a brief takes ~8s, a policy draft ~10s.
   - Explanations: the gate's `onHeld` hook (fire-and-forget, after the decision is recorded) runs `Explainer`. Totals and related calls are computed in code; agent arguments are fenced as untrusted, and injection attempts are surfaced as concerns. Stored on the approval and recorded as `approval.explained`.
@@ -60,13 +70,13 @@ TypeScript, Node.js, the official MCP TypeScript SDK (Handrail is an MCP server 
 
 ## Commands
 
-- `npm run build:web`: builds the dashboard (`web/`, React + AG Grid) into `web/dist`, which Handrail serves at `/` (sign in with `HANDRAIL_ADMIN_TOKEN`). `npm run dev:web` runs it with hot reload on :5173, proxying `/api` to :8787.
+- `npm run build:web`: builds the dashboard (`web/`, React + AG Grid) into `web/dist`, which Handrail serves (homepage at `/`, dashboard at `/app`; the first sign-up becomes admin). `npm run dev:web` runs it with hot reload on :5173, proxying `/api` to :8787.
 - `npm test`: unit tests (policy engine and gate; no network).
 - `npm run smoke`: starts Handrail over stdio, lists tools, makes one read-only call.
 - `npm run demo:approval [-- --auto]`: end-to-end allow / hold+approve / block / hold+reject against the sandbox, using a fake capture ID so no money moves.
 - `npm run sandbox:capture [-- --amount 20.00]`: creates a real sandbox order, waits for buyer approval in the browser, captures it through Handrail, prints the capture ID.
 - `npm run demo:retry-storm [-- --capture <id> --amount 5.00 --count 10]`: identical refunds fired at once; PayPal receives one.
-- `npm run approvals [-- approve|reject <id> [note]]`: decide held calls via the admin API.
+- `npm run approvals [-- approve|reject <id> [note]]`: decide held calls via the admin API (uses `HANDRAIL_ADMIN_TOKEN`).
 - `npm run audit:verify`: checks the hash chain and that the working tables match it; exits 1 on tampering.
 - `npm run probe`: re-checks which PayPal MCP endpoints work.
 - `npm run check:drop-in [-- --update]`: compares what an agent sees from PayPal's MCP server with what it sees from Handrail; exits 1 on any difference beyond the documented additions.
