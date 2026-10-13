@@ -1,0 +1,7 @@
+paypal_app_agent.py is PayPal's official LangChain example, copied unchanged from
+https://github.com/paypal/agent-toolkit/blob/main/python/examples/langchain/app_agent.py
+(commit a3aa963). Copyright PayPal, licensed under the Apache License 2.0:
+https://www.apache.org/licenses/LICENSE-2.0
+
+app_agent.py is that file, modified: it uses Handrail's wrapper instead of PayPal
+credentials, and asks for two refunds instead of an order.

@@ -1,0 +1,7 @@
+# Handrail's LangChain wrapper, from this repo (not on PyPI)
+handrail-core @ git+https://github.com/Malottey1/handrail#subdirectory=packages/python/handrail-core
+handrail-langchain @ git+https://github.com/Malottey1/handrail#subdirectory=packages/python/handrail-langchain
+# As in PayPal's example
+langchain==0.3.23
+langchain-openai==0.2.2
+python-dotenv

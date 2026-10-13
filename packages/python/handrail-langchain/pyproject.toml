@@ -1,0 +1,15 @@
+[project]
+name = "handrail-langchain"
+version = "0.1.0"
+description = "PayPal's Agent Toolkit tools for LangChain, with every call going through Handrail."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+dependencies = ["handrail-core>=0.1,<0.2", "langchain-core>=0.3"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

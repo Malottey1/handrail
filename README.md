@@ -154,6 +154,72 @@ curl -s http://127.0.0.1:8787/v1/tools/call -H "Authorization: Bearer $KEY" -H "
 
 A held call waits about 20 seconds for a decision before answering, the same as over MCP.
 
+### Or use it from LangChain or CrewAI (Python)
+
+[`packages/python`](packages/python) has drop-in replacements for the Agent Toolkit's `PayPalToolkit`, in `handrail-langchain` and `handrail-crewai`. They give the agent the same tools and take the same `configuration`. They hold only an agent key and call Handrail's tool-call API; they never get PayPal credentials. Installation and details: [packages/python/README.md](packages/python/README.md).
+
+Here is PayPal's official LangChain example ([`examples/python/langchain`](examples/python/langchain)) switched to Handrail. The first and third hunks are the switch (the import, the two environment variables and the constructor). The others make the example demonstrate an allowed refund and a held one:
+
+```diff
+--- paypal_app_agent.py (PayPal's example)
++++ app_agent.py (through Handrail)
+@@ -4,13 +4,12 @@
+ 
+ from dotenv import load_dotenv
+ 
+-from paypal_agent_toolkit.langchain.toolkit import PayPalToolkit
+-from paypal_agent_toolkit.shared.configuration import Configuration, Context
++from handrail_langchain import HandrailToolkit, Configuration, Context
+ 
+ #uncomment after setting the env file
+ # load_dotenv()
+-PAYPAL_CLIENT_ID = os.getenv("PAYPAL_CLIENT_ID")
+-PAYPAL_CLIENT_SECRET = os.getenv("PAYPAL_CLIENT_SECRET")
++HANDRAIL_URL = os.getenv("HANDRAIL_URL")
++HANDRAIL_AGENT_KEY = os.getenv("HANDRAIL_AGENT_KEY")
+ OPENAI_API_VERSION = "2024-02-15-preview"
+ 
+ 
+@@ -28,6 +27,9 @@
+             "create": True,
+             "get": True,
+             "capture": True,
++        },
++        "payments": {
++            "createRefund": True,
+         }
+     },
+     context=Context(
+@@ -37,7 +39,7 @@
+ 
+ 
+ # --- STEP 3: Build PayPal Toolkit ---
+-toolkit = PayPalToolkit(client_id=PAYPAL_CLIENT_ID, secret=PAYPAL_CLIENT_SECRET, configuration = configuration)
++toolkit = HandrailToolkit(url=HANDRAIL_URL, agent_key=HANDRAIL_AGENT_KEY, configuration = configuration)
+ tools = toolkit.get_tools()
+ 
+ 
+@@ -53,6 +55,10 @@
+ 
+ # --- STEP 5: Run Agent with Prompt ---
+ if __name__ == "__main__":
+-    prompt = "Create an PayPal order for $50 for Premium News service."
++    capture_id = os.getenv("CAPTURE_ID")
++    prompt = (
++        f"Refund $5.00 of PayPal capture {capture_id}: the item arrived damaged. "
++        f"Then refund $150.00 of the same capture for a missing order. Report what happened to each refund."
++    )
+     result = agent.run(prompt)
+     print("Agent Output:", result)
+```
+
+Run `try_refunds.py` in the same folder to see the two refunds without an LLM. Against the sandbox it prints:
+
+```
+5.00 USD: sent to PayPal: refund … is COMPLETED
+150.00 USD: pending_approval (approval apr_…). Approve it in Handrail's dashboard.
+```
+
 ### Try the demos
 
 ```bash
