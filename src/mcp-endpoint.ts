@@ -18,6 +18,19 @@ export interface McpEndpointDeps {
   now?: () => number;
 }
 
+/**
+ * The agent behind a request's bearer key and the gate its calls go through
+ * (a demo key reaches its own demo workspace), or null for a missing, unknown
+ * or revoked key. Shared by /mcp and the REST tool-call API.
+ */
+export function resolveAgent(req: IncomingMessage, deps: Pick<McpEndpointDeps, "gate" | "agentKeys" | "agentToken" | "demo" | "now">): { agent: AgentIdentity; gate: Gate } | null {
+  const real = authenticateAgent(req, deps);
+  if (real) return { agent: real, gate: deps.gate };
+  return deps.demo?.authenticateAgent(bearer(req) ?? "") ?? null;
+}
+
+export const NO_AGENT_KEY = "Missing, unknown or revoked agent key. Create one in the dashboard (Admin > Agent keys).";
+
 /** The agent behind a request's bearer key, or null if the key is missing, unknown or revoked. */
 export function authenticateAgent(req: IncomingMessage, deps: Pick<McpEndpointDeps, "agentKeys" | "agentToken" | "now">): AgentIdentity | null {
   const key = bearer(req);
@@ -47,14 +60,12 @@ export async function handleMcp(req: IncomingMessage, res: ServerResponse, deps:
     res.writeHead(405, { Allow: "POST" }).end();
     return;
   }
-  const real = authenticateAgent(req, deps);
-  const demo = real ? null : deps.demo?.authenticateAgent(bearer(req) ?? "");
-  const agent = real ?? demo?.agent;
-  const gate = demo?.gate ?? deps.gate;
-  if (!agent) {
-    json(res, 401, { error: "Missing, unknown or revoked agent key. Create one in the dashboard (Admin > Agent keys)." }, { "WWW-Authenticate": "Bearer" });
+  const resolved = resolveAgent(req, deps);
+  if (!resolved) {
+    json(res, 401, { error: NO_AGENT_KEY }, { "WWW-Authenticate": "Bearer" });
     return;
   }
+  const { agent, gate } = resolved;
 
   try {
     const body = await readJson(req);

@@ -8,16 +8,8 @@ import {
   ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import type { AgentIdentity } from "./auth/agent-keys.js";
-import { GET_APPROVAL_TOOL, type Gate } from "./gate.js";
-import { IDEMPOTENCY_ARG } from "./idempotency.js";
-import { classifyTool } from "./policy/classify.js";
-
-const IDEMPOTENCY_PROPERTY = {
-  type: "string",
-  description:
-    "Optional. Calls with the same key are one operation: Handrail never executes it twice. " +
-    "Without a key, identical calls within an hour are treated as retries of one operation.",
-};
+import { callAgentTool, withHandrailAdditions } from "./agent-tools.js";
+import type { Gate } from "./gate.js";
 
 /** How Handrail identifies itself to agents. It never claims to be PayPal. Keep in step with package.json. */
 export const SERVER_INFO = { name: "handrail", version: "0.1.0" };
@@ -40,19 +32,9 @@ export function createProxyServer(upstream: Client, gate: Gate, agent: AgentIden
     instructions: upstream.getInstructions(),
   });
 
-  server.setRequestHandler(ListToolsRequestSchema, async (request) => {
-    const result = await upstream.listTools(request.params);
-    const tools = result.tools.map((tool) =>
-      classifyTool(tool.name) === "read"
-        ? tool
-        : { ...tool, inputSchema: { ...tool.inputSchema, properties: { ...tool.inputSchema.properties, [IDEMPOTENCY_ARG]: IDEMPOTENCY_PROPERTY } } },
-    );
-    return { ...result, tools: [...tools, GET_APPROVAL_TOOL] };
-  });
-
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    return gate.handle(request.params.name, request.params.arguments ?? {}, agent);
-  });
+  // Shared with the REST tool-call API (src/agent-tools.ts).
+  server.setRequestHandler(ListToolsRequestSchema, async (request) => withHandrailAdditions(await upstream.listTools(request.params)));
+  server.setRequestHandler(CallToolRequestSchema, async (request) => callAgentTool(gate, request.params.name, request.params.arguments ?? {}, agent));
 
   // Read-only, so passed straight through.
   if (upstreamCaps.resources) {

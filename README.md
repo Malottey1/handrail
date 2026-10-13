@@ -122,6 +122,38 @@ Point any MCP client at Handrail instead of PayPal. Over stdio:
 
 Or over HTTP: an admin creates an agent key in **Team & keys**. The key is shown once; Handrail stores only its hash. The agent then sends `POST http://127.0.0.1:8787/mcp` with `Authorization: Bearer <key>`. Calls without a valid key are refused, and revoking a key cuts its agent off immediately.
 
+### Or call tools over plain HTTP (any agent framework)
+
+Frameworks that don't speak MCP can use the tool-call API instead. It offers the same tools, with the same names and schemas, and each call goes through the same pipeline as `/mcp`: policy, approval, idempotency, audit log and alerts. Results are exactly what an MCP client gets. Use the same agent keys; never PayPal credentials.
+
+```bash
+KEY=hr_agent_...   # an agent key from Team & keys
+
+# List the tools (MCP tools/list, every page)
+curl -s http://127.0.0.1:8787/v1/tools -H "Authorization: Bearer $KEY"
+
+# Call one (MCP tools/call): a small refund goes straight through
+curl -s http://127.0.0.1:8787/v1/tools/call -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d '{"name": "create_refund", "arguments": {"capture_id": "2GG27306VR5212345", "amount": {"currency_code": "USD", "value": "5.00"}, "idempotency_key": "order-1042-refund"}}'
+# -> {"content":[{"type":"text","text":"{\"id\":\"…\",\"status\":\"COMPLETED\",…}"}]}
+
+# An over-limit one is held: Handrail answers with its status instead of PayPal's
+# -> {"content":[{"type":"text","text":"{\"handrail\":{\"status\":\"pending_approval\",\"approval_id\":\"apr_…\",…}}"}]}
+
+# Check on it later (or wait up to 25 s for a decision)
+curl -s http://127.0.0.1:8787/v1/tools/call -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d '{"name": "handrail_get_approval", "arguments": {"approval_id": "apr_…", "wait_seconds": 25}}'
+```
+
+| Request | Answer |
+| --- | --- |
+| `GET /v1/tools` | `200 {"tools": [...]}` |
+| `POST /v1/tools/call` with `{"name", "arguments"}` | `200` with the MCP `CallToolResult` (`content`, `isError`). A held, blocked or duplicate call is still a 200; its text is Handrail's JSON (`pending_approval`, `blocked`…). |
+| No, unknown or revoked key | `401` |
+| Malformed body | `400 {"error": "..."}` (nothing is called) |
+
+A held call waits about 20 seconds for a decision before answering, the same as over MCP.
+
 ### Try the demos
 
 ```bash

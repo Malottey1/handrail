@@ -20,6 +20,7 @@ import { connectUpstream } from "./paypal/upstream.js";
 import { AnthropicLlm } from "./ai/llm.js";
 import { loadPolicyFile } from "./policy/load.js";
 import { handleMcp } from "./mcp-endpoint.js";
+import { handleToolApi } from "./tool-api.js";
 import { createProxyServer, SERVER_INFO } from "./proxy.js";
 import { serveDashboard } from "./static.js";
 import { handleWebhook } from "./webhook-endpoint.js";
@@ -167,6 +168,10 @@ async function main(): Promise<void> {
     if (await adminApi(req, res)) {
       return;
     }
+    // The REST tool-call API: same tools and pipeline as /mcp, for frameworks that don't speak MCP.
+    if (!stdio && (await handleToolApi(req, res, { upstream, gate, agentKeys, agentToken: config.agentToken, demo }))) {
+      return;
+    }
     if (path !== "/mcp" && (await serveDashboard(req, res, DASHBOARD_DIR))) {
       return;
     }
@@ -193,6 +198,7 @@ async function main(): Promise<void> {
     log(`Dashboard at http://${host}:${config.port}/${accounts.countUsers() === 0 ? " (no accounts yet: the first sign-up becomes admin)" : ""}`);
     log(`Admin API at http://${host}:${config.port}/api (dashboard sessions${config.adminToken ? " or HANDRAIL_ADMIN_TOKEN" : ""})`);
     if (!stdio) log(`MCP at http://${host}:${config.port}/mcp (agent keys from the dashboard${config.agentToken ? " or HANDRAIL_AGENT_TOKEN" : ""})`);
+    if (!stdio) log(`Tool-call API at http://${host}:${config.port}/v1/tools (same agent keys)`);
     log(`PayPal webhooks at http://${host}:${config.port}/webhooks/paypal${config.paypalWebhookId ? "" : " (disabled: set PAYPAL_WEBHOOK_ID)"}`);
     if (config.allowUnverifiedWebhooks) log("WARNING: accepting unverified webhook events (HANDRAIL_WEBHOOK_ALLOW_UNVERIFIED=true)");
   });
