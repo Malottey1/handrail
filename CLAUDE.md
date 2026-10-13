@@ -7,6 +7,14 @@ Deadline: Nov 12, 2026, 12:00 pm PT. Target: Nov 10, 2026.
 
 A safety layer between an AI agent and PayPal's Agent Toolkit / sandbox MCP server. To the agent it looks like PayPal's MCP server, exposing the same tools, but it checks every money-moving call before forwarding it.
 
+## Positioning
+
+- Handrail answers "should my agent be allowed to make this PayPal call?", not "did the work earn payment?"
+- It protects a business from its own agent, sitting in front of PayPal's Agent Toolkit / MCP server.
+- Core pitch: drop-in. Point an existing Agent Toolkit agent at Handrail and every money-moving call gets limits, approval, idempotency and an audit trail, with no agent code changes.
+- Lead with refunds (`create_refund`) and dispute concessions (`accept_dispute_claim`) in docs and the demo. Capture (`pay_order`) is secondary.
+- Another entry, Stood (github.com/ma-za-kpe/stood), is a proof gate for agent-to-agent milestone payments. It shares some philosophy (rules move money, models only report), idempotent hold/capture/void, and AG Grid. Don't copy its wording or framing in the README, UI text or docs.
+
 ## The problem
 
 An agent connected to PayPal's toolkit can issue refunds, concede disputes, cancel invoices or subscriptions, and capture payments with nothing checking the call first. The toolkit only lets you turn tools on or off. It has no approval step, no spending limit, and no per-call idempotency key (PayPal-Request-Id is set per client, never per call), so a retried request can duplicate an action. There's also no record of what the agent actually did.
@@ -47,6 +55,7 @@ TypeScript, Node.js, the official MCP TypeScript SDK (Handrail is an MCP server 
   - Explanations: the gate's `onHeld` hook (fire-and-forget, after the decision is recorded) runs `Explainer`. Totals and related calls are computed in code; agent arguments are fenced as untrusted, and injection attempts are surfaced as concerns. Stored on the approval and recorded as `approval.explained`.
   - Policy: `POST /api/policy/compile` returns a proposal (add/remove rules, assumptions) validated by `parsePolicy`, plus Handrail's own restatement and deterministic warnings (removed strict rules, tools losing coverage, no-op allow rules). One repair round on validation failure. Nothing changes until `PUT /api/policy` with the base hash (409 on a stale edit). `PolicyStore` writes the file atomically, records `policy.changed` (who, the English source, diff), and reloads the file when it changes on disk (so stdio instances pick up dashboard edits).
   - Local UI testing without a key: point `ANTHROPIC_BASE_URL` at a fake Messages API.
+- Drop-in (`src/tool-parity.ts`, `test/drop-in.test.ts`): toward the agent, Handrail mirrors PayPal's server info (`PayPal MCP Agent 1.0.0`), capabilities, instructions and resources (passed through), and every tool's name, description, input schema and `execution` field, in the same order. The only additions are an optional `idempotency_key` on non-read tools and the `handrail_get_approval` tool (`HANDRAIL_ADDITIONS`). The test replays `test/fixtures/paypal-mcp-server.json` as a fake upstream and fails on any other difference; `npm run check:drop-in` compares against the live server, and `-- --update` refreshes the fixture. PayPal computes `list_transactions`' `start_date`/`end_date` defaults from the clock on every listing, so timestamp defaults compare as equal. Not forwarded: `list_changed` notifications (PayPal's list is static in practice).
 - Default port is 8787 (3000 is used by another app on the dev machine).
 
 ## Commands
@@ -60,6 +69,7 @@ TypeScript, Node.js, the official MCP TypeScript SDK (Handrail is an MCP server 
 - `npm run approvals [-- approve|reject <id> [note]]`: decide held calls via the admin API.
 - `npm run audit:verify`: checks the hash chain and that the working tables match it; exits 1 on tampering.
 - `npm run probe`: re-checks which PayPal MCP endpoints work.
+- `npm run check:drop-in [-- --update]`: compares what an agent sees from PayPal's MCP server with what it sees from Handrail; exits 1 on any difference beyond the documented additions.
 
 ## Auth
 
@@ -67,10 +77,10 @@ Handrail holds `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` and gets access tok
 
 ## Build order
 
-1. Proxy that passes MCP calls through to PayPal's sandbox MCP server and logs them.
-2. Policy engine and approval flow.
+1. Proxy that passes MCP calls through to PayPal's sandbox MCP server and logs them. Drop-in: same server identity, tools and schemas as upstream.
+2. Policy engine and approval flow, with `create_refund` and `accept_dispute_claim` first (rules, approval, demo coverage); other money tools after.
 3. Idempotency and webhook matching.
-4. Dashboard.
+4. Dashboard. The AG Grid audit log and the approval queue are the most polished parts: filtering, status badges, and row detail showing the decision reason and PayPal's response.
 5. Plain-English policy feature, demo polish, README, demo video.
 
 ## Demo (under 3 minutes)
