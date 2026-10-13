@@ -55,10 +55,22 @@ TypeScript, Node.js, the official MCP TypeScript SDK (Handrail is an MCP server 
   - CSRF: synchronizer token per session, sent as `X-CSRF-Token` on every cookie-authenticated change; any state-changing `/api` request whose Origin/Referer host differs from Host is refused (covers login CSRF too).
   - Login limits (in memory): 5 failures per IP+email and 30 per IP per 15 min; unknown emails still run an Argon2 verify.
   - Roles: admin > approver > viewer, checked per route in `createAdminApi`. The first non-demo sign-up becomes admin inside a `BEGIN IMMEDIATE` transaction; later sign-ups need an invite (one use, one email, 7 days, stored hashed). An admin can't change their own role, and the last active admin can't be demoted or disabled.
-  - `HANDRAIL_ADMIN_TOKEN` still works as a bearer token for scripts (acts as admin, recorded as "<by> (admin token)").
+  - `HANDRAIL_ADMIN_TOKEN`: local scripts only. Unset means every bearer token is refused on `/api`. `checkAdminToken` (src/auth/http.ts) stops startup if it's set on Render (`RENDER` / `RENDER_SERVICE_ID`). Acts as admin and is always recorded under `ADMIN_SCRIPT` ("Admin script", id `admin-script`), with an optional script label: "Admin script (<by>)".
   - Approvals record `decided_by` (name) and `decided_by_id`; policy changes record `byId`. User, invite and agent-key changes are audit-chain entries (never password hashes or key material).
   - Agent keys (`hr_agent_…`): shown once, stored as SHA-256, revocable. `/mcp` (`src/mcp-endpoint.ts`) refuses calls without a valid key (or `HANDRAIL_AGENT_TOKEN`); every call, duplicate and approval records the agent (`agent_key_id`, `agent_name`), and stdio calls are recorded as "Local agent (stdio)".
   - Demo: `HANDRAIL_DEMO_ACCESS=true` seeds "Demo Approver" (approver, random unusable password) and enables `POST /api/auth/demo`. It can't sign in with a password, change its profile or password, or become admin.
+- Workspaces (`src/workspace.ts`): `openWorkspace` builds one set of stores (call log, approvals, webhooks, operations, agent keys, policy, audit chain) plus the gate and explainer on a database. The real deployment has one, on `handrail.db`; accounts and sessions stay global.
+- Demo isolation (`src/demo/`, tests in `test/auth.test.ts`):
+  - `DemoService` gives every demo session (keyed by session-token hash) its own workspace on an in-memory database, with a copy of the policy (`PolicyStore` with a null path: never written to disk) and a "Demo agent" key.
+  - The admin API swaps in that workspace for demo sessions, so judges never see each other's data or real data, and limits only count their own runs.
+  - A workspace is discarded after 2 hours idle; there are at most 50, and the least recently used idle one is evicted first.
+  - PayPal ids created by demo runs go in `demo_resources` (real DB), so `handleWebhook` routes their events to the live demo workspace or drops them, never into real data.
+- Demo agent (`src/demo/agent.ts`, `POST/GET /api/demo/run`, demo account only):
+  - It makes a sandbox sale by card (`src/demo/sale.ts`; test card 4111…, captured in one step, no buyer approval), then connects to its own `/mcp` over HTTP with the workspace's "Demo agent" key, like any outside agent.
+  - Steps: a refund under the lowest refund approval limit (allowed), one over it (held, with the AI brief), then a retry of the held one (deduplicated). `planDemo` picks the amounts from the policy (5.00 and limit+20 with the default policy).
+  - Outcomes are read from the call log.
+  - Limits: one run at a time per workspace, 1/min per session, 10/hour per IP, 60/hour overall. Needs HTTP mode, not stdio.
+  - Verified live (Oct 13): sale, allowed 5.00 refund COMPLETED, 120.00 held with brief, approved and refunded once, retry answered as a duplicate.
 - Branding: tokens in `web/src/styles.css` (`--brand`, `--brand-hover`, `--brand-tint`, neutrals; status colours separate: allowed/succeeded teal, held amber, blocked/rejected red, webhook mismatch magenta, AI indigo). Light by default, dark via `data-theme="dark"` (toggle, stored in localStorage); AG Grid themes in `web/src/grid.ts` use the same values. The brand green `#2f7a46` is PROVISIONAL: `web/public/handrail-logo.png` wasn't in the repo yet, so it couldn't be sampled; the `Logo` component falls back to an SVG mark until the file exists.
 - Dashboard: polls the admin API (approvals 2s, summary 3s, audit verify 10s); no websockets. Registers only the AG Grid modules it uses. Grid containers need an explicit height (a flex-grown height collapses the grid to 0).
 - AI (`src/ai/`), advisory only and off without `ANTHROPIC_API_KEY` (model `HANDRAIL_AI_MODEL`, default `claude-opus-5-5`). Structured output via `output_config.format` (Opus 5.5 rejects forced `tool_choice`); `structuredSchema` strips keywords it may not accept (oneOf → anyOf, length/range/pattern limits), and every answer is still validated with zod. Verified with real Claude (Oct 12): a brief takes ~8s, a policy draft ~10s.
@@ -76,7 +88,7 @@ TypeScript, Node.js, the official MCP TypeScript SDK (Handrail is an MCP server 
 - `npm run demo:approval [-- --auto]`: end-to-end allow / hold+approve / block / hold+reject against the sandbox, using a fake capture ID so no money moves.
 - `npm run sandbox:capture [-- --amount 20.00]`: creates a real sandbox order, waits for buyer approval in the browser, captures it through Handrail, prints the capture ID.
 - `npm run demo:retry-storm [-- --capture <id> --amount 5.00 --count 10]`: identical refunds fired at once; PayPal receives one.
-- `npm run approvals [-- approve|reject <id> [note]]`: decide held calls via the admin API (uses `HANDRAIL_ADMIN_TOKEN`).
+- `npm run approvals [-- approve|reject <id> [note]]`: decide held calls via the admin API (uses `HANDRAIL_ADMIN_TOKEN`; local only, recorded as "Admin script").
 - `npm run audit:verify`: checks the hash chain and that the working tables match it; exits 1 on tampering.
 - `npm run probe`: re-checks which PayPal MCP endpoints work.
 - `npm run check:drop-in [-- --update]`: compares what an agent sees from PayPal's MCP server with what it sees from Handrail; exits 1 on any difference beyond the documented additions.

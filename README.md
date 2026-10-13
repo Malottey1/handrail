@@ -6,9 +6,20 @@ Built for PayPal's *Build What's Next with PayPal and AI* hackathon. Sandbox onl
 
 ## Try the demo
 
-Open the hosted sandbox deployment (the link is on the Devpost page) and click **Try the demo**, on the homepage or the sign-in page. It signs you in as **Demo Approver**, a shared account with the *approver* role, on PayPal's sandbox: you can approve or reject held calls and look at everything, but you can't change the policy, people or keys. No real money moves.
+Open the hosted sandbox deployment (the link is on the Devpost page) and click **Try the demo**, on the homepage or the sign-in page. It signs you in as **Demo Approver**, with the *approver* role, on PayPal's sandbox: you can approve or reject held calls and look at everything, but you can't change the policy, people or keys. No real money moves.
 
-To run the same thing yourself, set `HANDRAIL_DEMO_ACCESS=true` (see [Run it](#run-it)). The demo account is created when Handrail starts, has a random password nobody knows, can only be entered through the button, and can't change its own name, email or password. Its decisions are recorded as "Demo Approver" like anyone else's.
+Then click **Run demo agent** on the Approvals tab. A scripted support agent connects to Handrail's `/mcp` with its own key ("Demo agent"), the same way any agent would, and works on a real sandbox sale:
+
+1. A customer pays (Handrail makes a sandbox card payment for the agent to refund).
+2. The agent refunds a small amount. It's under the policy's limit, so it goes straight to PayPal.
+3. The agent refunds an amount over the limit. Handrail holds it and an AI brief appears on the approval card. Approve or reject it.
+4. The agent retries that refund. Handrail recognises it as the same request: nothing is sent again and no second approval appears.
+
+The amounts come from the policy in force. Each step shows what actually happened, read from the call log. The Activity, Webhooks and Audit log tabs show the full record.
+
+**Each "Try the demo" sign-in gets its own workspace.** That's a separate in-memory database with its own call log, approvals, audit chain, webhooks and "Demo agent" key, and a copy of the policy. Several people can use the demo at once without seeing or deciding each other's calls, and their runs don't use up each other's rate or spend limits. Nothing done in the demo touches real data, and real users never see demo activity. PayPal's webhooks for demo sales are routed to the workspace that made them, and dropped once it's gone. A workspace is cleared after 2 hours without use. The demo agent runs at most once a minute per session, 10 times an hour per address and 60 times an hour in total.
+
+To run the same thing yourself, set `HANDRAIL_DEMO_ACCESS=true` (see [Run it](#run-it)), and run Handrail over HTTP (`npm run dev`), since the demo agent connects to `/mcp`. The demo account is created when Handrail starts, has a random password nobody knows, can only be entered through the button, and can't change its own name, email or password.
 
 ## The problem
 
@@ -70,13 +81,14 @@ Open http://127.0.0.1:8787 and click **Set up Handrail**: the first account beco
 - Sessions live in httpOnly, SameSite=Strict cookies. They are also Secure, except on plain-HTTP localhost.
 - Every change made with a session needs a per-session CSRF token. Cross-site requests are refused.
 - Failed logins are rate-limited.
+- `HANDRAIL_ADMIN_TOKEN` is for local scripts only. When it's unset, Handrail refuses every bearer token on the API. Never set it on Render or any public deploy; Handrail won't start on Render if it is set. Anything done with it is recorded under the name "Admin script" (plus the script's own label, if it gives one), never anonymously.
 
 | Variable | Needed for |
 | --- | --- |
 | `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | Everything. Sandbox credentials only. |
-| `HANDRAIL_ADMIN_TOKEN` | Optional. A bearer token for terminal scripts (`npm run approvals`, the demos); it acts as an admin. People use their own accounts. |
+| `HANDRAIL_ADMIN_TOKEN` | Optional, local only. A bearer token for terminal scripts (`npm run approvals`, the demos); it acts as an admin, recorded as "Admin script". **Never set it on Render**: Handrail refuses to start there with it. People use their own accounts. |
 | `HANDRAIL_AGENT_TOKEN` | Optional. One extra agent key from `.env`. Normally an admin creates agent keys in the dashboard. |
-| `HANDRAIL_DEMO_ACCESS` | Optional. `true` turns on **Try the demo** (a shared approver account). For sandbox demos only. |
+| `HANDRAIL_DEMO_ACCESS` | Optional. `true` turns on **Try the demo** and **Run demo agent**, each sign-in in its own workspace. For sandbox demos only. |
 | `HANDRAIL_TRUST_PROXY` | Set to `true` behind a proxy such as Render, so client IPs (for login rate limits) and HTTPS are detected. |
 | `PAYPAL_WEBHOOK_ID` | Receiving webhooks. Register a URL ending in `/webhooks/paypal`. |
 | `ANTHROPIC_API_KEY` | The AI brief and the plain-English policy. Optional. |
@@ -122,6 +134,7 @@ Decide held calls in the dashboard, or with `npm run approvals -- approve <id>`.
 - Sandbox only. It has not been tested with live credentials, and shouldn't be.
 - One SQLite file. Deleting the newest audit entries can only be detected by comparing against a head hash recorded elsewhere (`audit:verify` prints it).
 - The dashboard polls every few seconds rather than streaming updates.
+- Demo workspaces live in memory, so a restart clears them.
 
 ## License
 
