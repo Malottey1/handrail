@@ -23,7 +23,8 @@ const OUTCOME_LABELS: Record<string, [string, string]> = {
   expired: ["Expired", "muted"],
   matched: ["Matched", "good"],
   mismatch: ["Mismatch", "flag"],
-  outside_handrail: ["Outside Handrail", "flag"],
+  outside_handrail: ["Unattributed – not sent through Handrail", "flag"],
+  unattributed: ["Unattributed – not sent through Handrail", "flag"],
   unrelated: ["Unrelated", "muted"],
   ignored: ["Ignored", "muted"],
 };

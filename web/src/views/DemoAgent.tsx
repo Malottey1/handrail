@@ -6,8 +6,9 @@ const STEP_ICON: Record<DemoStepStatus, string> = { waiting: "", running: "", do
 
 /**
  * For the demo account: runs a scripted agent through Handrail against
- * PayPal's sandbox, so a judge can watch an allowed refund, a held one and a
- * deduplicated retry without wiring up an agent of their own.
+ * PayPal's sandbox, so a judge can watch an allowed refund, a held one, a
+ * deduplicated retry and split refunds caught by a running total, without
+ * wiring up an agent of their own.
  */
 export function DemoAgentPanel({ session, onActivity }: { session: Session; onActivity: () => void }) {
   const status = usePoll(() => api<DemoStatus>(session, "/demo/run"), 1500);
@@ -41,8 +42,9 @@ export function DemoAgentPanel({ session, onActivity }: { session: Session; onAc
         <div>
           <h2 className="section-title">Demo agent</h2>
           <p className="section-help">
-            A scripted support agent connects to Handrail with its own key ("Demo agent") and refunds a real sandbox sale: one small
-            refund, one over the policy's limit, then a retry of that one. Everything goes through the same gateway a real agent uses.
+            A scripted support agent connects to Handrail with its own key ("Demo agent") and refunds real sandbox sales: one small
+            refund, one over the policy's limit, a retry of that one, then three small refunds on another sale that together pass the
+            per-payment total. Everything goes through the same gateway a real agent uses.
           </p>
         </div>
         <button className="btn btn-primary" onClick={start} disabled={starting || running || wait > 0}>
@@ -85,7 +87,7 @@ export function DemoAgentPanel({ session, onActivity }: { session: Session; onAc
       {run?.error && <p className="error">The demo agent stopped: {run.error}</p>}
       <p className="fine">
         This is your own demo workspace: other visitors can't see it, and it's cleared after {s?.resetsAfterMinutes ?? 120} minutes
-        without use. The agent can run once a minute.
+        without use. Each run starts fresh, and the agent can run once a minute.
       </p>
     </section>
   );

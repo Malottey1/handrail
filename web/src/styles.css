@@ -2051,3 +2051,203 @@ a.btn {
     padding: 4px 10px;
   }
 }
+
+/* Approval cards: what PayPal verified vs what the agent says */
+
+.running-totals {
+  border-left: 3px solid var(--warn);
+  background: var(--warn-bg);
+  border-radius: 0 8px 8px 0;
+  padding: 8px 12px;
+  font-size: 14px;
+}
+
+.running-totals p {
+  margin: 0;
+}
+
+.running-totals p + p {
+  margin-top: 6px;
+}
+
+.verified {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--surface);
+}
+
+.verified-label,
+.agent-says-label {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.verified-label {
+  color: var(--good);
+}
+
+.verified-label::before {
+  content: "✓ ";
+}
+
+.verified-failed {
+  border-color: var(--warn);
+}
+
+.verified-failed .verified-label {
+  color: var(--warn);
+}
+
+.verified-failed .verified-label::before {
+  content: "! ";
+}
+
+.verified .kv {
+  margin: 0;
+}
+
+.verified .fine {
+  margin: 6px 0 0;
+}
+
+.agent-says {
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.agent-says-label {
+  color: var(--muted);
+}
+
+.agent-says figure {
+  margin: 0;
+}
+
+.agent-says figure + figure {
+  margin-top: 8px;
+}
+
+.agent-says blockquote {
+  margin: 0;
+  padding-left: 10px;
+  border-left: 3px solid var(--line);
+  font-style: italic;
+  overflow-wrap: anywhere;
+}
+
+.agent-says figcaption {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+/* Actions that didn't go through Handrail */
+
+.banner-flag {
+  display: block;
+  background: var(--flag-bg);
+  color: var(--flag);
+  border-bottom: 1px solid var(--flag);
+  text-decoration: none;
+}
+
+.banner-flag:hover {
+  text-decoration: underline;
+}
+
+.ag-row.row-unattributed {
+  background: var(--flag-bg);
+}
+
+.alert-preview-pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: inherit;
+  font-size: 13px;
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+/* Setup checklist */
+
+.setup {
+  display: grid;
+  gap: 20px;
+  max-width: 920px;
+}
+
+.setup-sub {
+  margin: 18px 0 8px;
+  font-size: 14px;
+  color: var(--ink-2);
+}
+
+.checklist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.checklist li {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.checklist .check {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.checklist li.ok .check {
+  background: var(--good-bg);
+  border-color: var(--good);
+  color: var(--good);
+}
+
+.checklist li.warn .check {
+  background: var(--warn-bg);
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.check-label {
+  margin: 0;
+  font-weight: 600;
+}
+
+.check-detail {
+  margin: 2px 0 0;
+  color: var(--ink-2);
+  font-size: 14px;
+}
+
+@media (max-width: 640px) {
+  .checklist li {
+    grid-template-columns: 24px minmax(0, 1fr);
+  }
+  .checklist li .btn {
+    grid-column: 2;
+    justify-self: start;
+  }
+}

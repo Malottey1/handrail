@@ -9,10 +9,11 @@ import { AuditView } from "./views/Audit";
 import { LoginPage, SignupPage } from "./views/AuthPages";
 import { HomePage } from "./views/Home";
 import { PolicyView } from "./views/Policy";
+import { SetupView } from "./views/Setup";
 import { TeamView } from "./views/Team";
 import { WebhooksView } from "./views/Webhooks";
 
-const TABS = ["approvals", "activity", "webhooks", "audit", "policy", "team", "account"] as const;
+const TABS = ["approvals", "activity", "webhooks", "audit", "policy", "setup", "team", "account"] as const;
 type Tab = (typeof TABS)[number];
 const TAB_LABELS: Record<Tab, string> = {
   approvals: "Approvals",
@@ -20,6 +21,7 @@ const TAB_LABELS: Record<Tab, string> = {
   webhooks: "Webhooks",
   audit: "Audit log",
   policy: "Policy",
+  setup: "Setup",
   team: "Team & keys",
   account: "Account",
 };
@@ -156,6 +158,12 @@ function Dashboard({ session, onSignOut, onUserChange }: { session: Session; onS
           what you do here. Start with "Run demo agent" below.
         </div>
       )}
+      {s && s.unattributed.last30d > 0 && (
+        <a className="banner banner-flag" href="#activity">
+          PayPal reported {s.unattributed.last30d} money-out action{s.unattributed.last30d === 1 ? "" : "s"} in the last 30 days that
+          didn't go through Handrail. Something may be bypassing it. See Activity, and check the Setup tab.
+        </a>
+      )}
       {summary.error && !(summary.error instanceof ApiError && summary.error.status === 401) && (
         <div className="banner">Can't reach Handrail: {summary.error.message}. Retrying…</div>
       )}
@@ -184,6 +192,7 @@ function Dashboard({ session, onSignOut, onUserChange }: { session: Session; onS
         {shown === "webhooks" && <WebhooksView session={session} />}
         {shown === "audit" && <AuditView session={session} verify={verify.data} />}
         {shown === "policy" && <PolicyView session={session} />}
+        {shown === "setup" && <SetupView session={session} />}
         {shown === "team" && <TeamView session={session} />}
         {shown === "account" && <AccountView session={session} onUserChange={onUserChange} />}
       </main>

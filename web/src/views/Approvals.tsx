@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { api, ApiError, can, type AlertInfo, type Approval, type Session } from "../api";
+import { api, ApiError, can, type AlertInfo, type Approval, type Money, type Session, type VerifiedFacts } from "../api";
 import { DecisionPill, Empty, Mono, Pill, StatusPill, useNow, usePoll } from "../components";
 import { countdown, formatMoney, paypalSummary, timeAgo, toolLabel } from "../format";
 import { DemoAgentPanel } from "./DemoAgent";
 
-/** The arguments worth showing on a card, most identifying first. */
-const KEY_ARGS = ["capture_id", "id", "order_id", "dispute_id", "invoice_id", "subscription_id", "note_to_payer", "reason", "note"];
+/** The ids worth showing on a card. The agent's free text (notes, reasons) goes under "Agent says". */
+const KEY_ARGS = ["capture_id", "id", "order_id", "dispute_id", "invoice_id", "subscription_id"];
 
 function keyArgs(args: Record<string, unknown>): Array<[string, string]> {
   const rows: Array<[string, string]> = [];
@@ -196,6 +196,87 @@ function FocusedApproval({ session, id, now }: { session: Session; id: string; n
   );
 }
 
+const money = (hundredths: number, currency: string) => formatMoney({ hundredths, currency });
+const PER_WORDS = { capture: "this payment", order: "this order", payer: "this customer", agent: "this agent" } as const;
+
+/**
+ * Cumulative limits, in a sentence: "$180.00 already refunded on this order
+ * (per PayPal); this would bring it to $270.00 of $240.00 paid. Limit $100.00."
+ */
+function RunningTotals({ approval: a }: { approval: Approval }) {
+  if (!a.totals?.length) return null;
+  return (
+    <div className="running-totals">
+      {a.totals.map((t) => (
+        <p key={t.ruleId}>
+          <strong>{money(t.already, t.currency)}</strong> already refunded on {PER_WORDS[t.per]}
+          <span className="muted"> ({t.source === "paypal" ? "per PayPal" : "per Handrail's log"})</span>
+          {t.held > 0 && <>, plus {money(t.held, t.currency)} held for approval</>}; this would bring it to{" "}
+          <strong>{money(t.total, t.currency)}</strong>
+          {t.paid !== null && <> of {money(t.paid, t.currency)} paid</>}. Limit {money(t.limit, t.currency)}.
+        </p>
+      ))}
+    </div>
+  );
+}
+
+const moneyOr = (m: Money | null | undefined, fallback = "unknown") => (m ? formatMoney(m) : fallback);
+
+/** What PayPal confirmed about the object, looked up before deciding. Never the agent's words. */
+export function Verified({ verified: v }: { verified: VerifiedFacts | null }) {
+  if (!v) return null;
+  const rows: Array<[string, string]> = [];
+  if (v.capture) rows.push(["Payment", `${moneyOr(v.capture.amount)} · ${v.capture.status?.toLowerCase().replaceAll("_", " ") ?? "status unknown"}`]);
+  if (v.order) rows.push(["Order", `${v.order.id} · ${moneyOr(v.order.amount)}`]);
+  if (v.refunds) {
+    rows.push(["Already refunded", `${moneyOr(v.refunds.capture, "nothing")} on this payment · ${moneyOr(v.refunds.order, "nothing")} on the order`]);
+  }
+  if (v.payer) rows.push(["Payer", [v.payer.name, v.payer.email, v.payer.card].filter(Boolean).join(" · ") || "not identified"]);
+  if (v.dispute) {
+    rows.push(["Dispute", `${moneyOr(v.dispute.amount)} · ${v.dispute.status ?? "status unknown"}${v.dispute.reason ? ` · ${v.dispute.reason.toLowerCase().replaceAll("_", " ")}` : ""}`]);
+    if (v.dispute.respondBy) rows.push(["Respond by", new Date(v.dispute.respondBy).toLocaleString()]);
+  }
+  if (v.invoice) rows.push(["Invoice", `${moneyOr(v.invoice.amount)} · ${v.invoice.status ?? "status unknown"} · to ${v.invoice.recipient ?? "unknown"}`]);
+  if (v.subscription) rows.push(["Subscription", `${v.subscription.status ?? "status unknown"} · plan ${v.subscription.plan ?? "unknown"}`]);
+  const failed = v.source === "unavailable";
+  return (
+    <section className={`verified ${failed ? "verified-failed" : ""}`}>
+      <p className="verified-label">{failed ? "Couldn't verify with PayPal" : "Verified with PayPal"}</p>
+      {rows.length > 0 && (
+        <dl className="kv">
+          {rows.map(([k, val]) => (
+            <div key={k}>
+              <dt>{k}</dt>
+              <dd>{val}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {v.error && <p className="fine">{failed ? `${v.error}. The amount above is what the agent asked for; nothing else was confirmed.` : `${v.error}.`}</p>}
+    </section>
+  );
+}
+
+const FIELD_WORDS: Record<string, string> = { note_to_payer: "Note to the customer", reason: "Reason", note: "Note" };
+
+/** The agent's own words, quoted and marked unverified. Never shown as fact. */
+function AgentSays({ approval: a }: { approval: Approval }) {
+  if (!a.agentSays?.length) return null;
+  return (
+    <section className="agent-says">
+      <p className="agent-says-label">Agent says (unverified)</p>
+      {a.agentSays.map((c) => (
+        <figure key={c.field}>
+          <blockquote>{c.text}</blockquote>
+          <figcaption>
+            {FIELD_WORDS[c.field] ?? c.field}, from {a.agent?.name ?? "the agent"}
+          </figcaption>
+        </figure>
+      ))}
+    </section>
+  );
+}
+
 /** Who was alerted about this held call (or, in a demo, the alert it would have sent). */
 function AlertLine({ alert }: { alert: AlertInfo | null }) {
   if (!alert || alert.status === "skipped") return null;
@@ -308,6 +389,9 @@ function ApprovalCard({
         )}
       </div>
 
+      <RunningTotals approval={a} />
+      <Verified verified={a.verified} />
+      <AgentSays approval={a} />
       <AiBrief approval={a} />
       <AlertLine alert={a.alert} />
 

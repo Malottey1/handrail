@@ -1,7 +1,7 @@
 // Typed client for Handrail's admin API (src/admin-api.ts).
-import type { Policy, Rule } from "../../src/policy/types.js";
+import type { CumulativeTotal, Policy, Rule, VerifiedFacts } from "../../src/policy/types.js";
 
-export type { Policy, Rule };
+export type { CumulativeTotal, Policy, Rule, VerifiedFacts };
 
 export type Role = "admin" | "approver" | "viewer";
 
@@ -134,6 +134,40 @@ export interface Approval {
   explanationModel: string | null;
   /** The held-call alert for this approval, once it went out (or was previewed, in a demo). */
   alert: AlertInfo | null;
+  /** What PayPal confirmed about the object, looked up before deciding. Null on calls from before this existed. */
+  verified: VerifiedFacts | null;
+  /** The agent's own words (notes, reasons): unverified. */
+  agentSays: Array<{ field: string; text: string }>;
+  /** Running totals behind cumulative_limit hits. */
+  totals: Array<CumulativeTotal & { ruleId: string; decision: Decision }>;
+}
+
+export interface UnattributedEvent {
+  eventId: string;
+  receivedAt: string;
+  eventType: string;
+  tool: string | null;
+  resourceId: string | null;
+  amount: Money | null;
+  verified: boolean;
+  reasons: string[];
+  alert: AlertInfo | null;
+}
+
+export interface SetupItem {
+  id: string;
+  kind: "auto" | "confirm";
+  label: string;
+  detail: string;
+  ok: boolean;
+  confirmedBy?: string | null;
+  confirmedAt?: string | null;
+}
+
+export interface SetupChecklist {
+  mcpUrl: string;
+  webhookUrl: string;
+  items: SetupItem[];
 }
 
 export type AlertStatus = "sent" | "partial" | "failed" | "off" | "nobody" | "skipped" | "preview";
@@ -191,6 +225,11 @@ export interface CallRow {
   outcome: string | null;
   agent_key_id: string | null;
   agent_name: string | null;
+  /** VerifiedFacts as JSON: what PayPal said about the object. */
+  verified_json: string | null;
+  capture_id: string | null;
+  order_id: string | null;
+  payer: string | null;
 }
 
 export type MatchStatus = "matched" | "mismatch" | "outside_handrail" | "unrelated" | "ignored";
@@ -230,6 +269,8 @@ export interface Summary {
   last24h: { calls: number; forwarded: number; held: number; expired: number; blocked: number; duplicates: number; failed: number };
   webhooks: { total: number; flagged: number };
   alerts: AlertChannels;
+  /** Money-out actions PayPal reported that didn't go through Handrail. */
+  unattributed: { last30d: number };
 }
 
 export interface PolicyResponse {
