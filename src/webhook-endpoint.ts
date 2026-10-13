@@ -15,6 +15,19 @@ export interface WebhookDeps {
   webhookId: string | undefined;
   /** Sandbox testing only: accept events whose signature can't be verified (e.g. the dashboard simulator). */
   allowUnverified: boolean;
+  /**
+   * Events about objects a demo run created go to that demo workspace's
+   * stores ("drop" once it's gone), so demo activity never lands in real data.
+   */
+  demo?: { routeWebhook(resourceIds: string[]): { callLog: CallLog; webhooks: WebhookStore } | "drop" | null } | null;
+}
+
+/** The PayPal objects an event is about: the resource, what it links "up" to, and related ids. */
+export function eventResourceIds(event: WebhookEvent): string[] {
+  const r = event.resource ?? {};
+  const up = (r.links as Array<{ rel?: string; href?: string }> | undefined)?.find((l) => l.rel === "up")?.href?.split("/").pop();
+  const related = r.supplementary_data?.related_ids ?? {};
+  return [r.id, up, related.order_id, related.capture_id].filter((id): id is string => typeof id === "string" && id.length > 0);
 }
 
 /**
@@ -81,7 +94,14 @@ export async function handleWebhook(req: IncomingMessage, res: ServerResponse, d
     return send(res, 400, { error: "Not a PayPal webhook event" });
   }
 
-  if (deps.store.has(event.id)) {
+  const routed = deps.demo?.routeWebhook(eventResourceIds(event)) ?? null;
+  if (routed === "drop") {
+    return send(res, 200, { ok: true, ignored: "demo workspace no longer exists" });
+  }
+  const store = routed?.webhooks ?? deps.store;
+  const callLog = routed?.callLog ?? deps.callLog;
+
+  if (store.has(event.id)) {
     return send(res, 200, { ok: true, duplicate: true });
   }
 
@@ -92,13 +112,13 @@ export async function handleWebhook(req: IncomingMessage, res: ServerResponse, d
   }
 
   const rule = EVENT_RULES[event.event_type];
-  const calls = rule ? deps.callLog.forwardedCalls(rule.tool, Date.now() - MATCH_WINDOW_MS).map(parseForwardedCall) : [];
+  const calls = rule ? callLog.forwardedCalls(rule.tool, Date.now() - MATCH_WINDOW_MS).map(parseForwardedCall) : [];
   const match = matchEvent(event, calls);
-  deps.store.insert(event, verified, match, raw, Date.now());
+  store.insert(event, verified, match, raw, Date.now());
 
   const flag = match.status === "mismatch" || match.status === "outside_handrail" ? " FLAGGED" : "";
   log(
-    `Webhook ${event.event_type} ${match.resourceId ?? ""} -> ${match.status}${flag}` +
+    `${routed ? "Demo webhook" : "Webhook"} ${event.event_type} ${match.resourceId ?? ""} -> ${match.status}${flag}` +
       `${match.callId ? ` (call #${match.callId})` : ""}${verified ? "" : " [UNVERIFIED]"}` +
       `${match.reasons.length ? `: ${match.reasons.join("; ")}` : ""}`,
   );

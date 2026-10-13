@@ -1,30 +1,28 @@
 import { createServer } from "node:http";
 import { DatabaseSync } from "node:sqlite";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createAdminApi, demoPassword } from "./admin-api.js";
-import { ApprovalStore } from "./approvals.js";
 import { AuditChain } from "./audit-chain.js";
-import { CallLog } from "./audit.js";
 import { AccountStore } from "./auth/accounts.js";
-import { AgentKeyStore, STDIO_AGENT } from "./auth/agent-keys.js";
+import { STDIO_AGENT } from "./auth/agent-keys.js";
 import { hashPassword } from "./auth/passwords.js";
 import { loadConfig } from "./config.js";
-import { Gate } from "./gate.js";
-import { OperationStore } from "./idempotency.js";
+import { createDemoSale } from "./demo/sale.js";
+import { DemoService } from "./demo/workspaces.js";
 import { log } from "./log.js";
 import { PayPalTokenManager } from "./paypal/auth.js";
 import { PayPalDirect } from "./paypal/direct.js";
 import { PayPalRest } from "./paypal/rest.js";
 import { connectUpstream } from "./paypal/upstream.js";
 import { AnthropicLlm } from "./ai/llm.js";
-import { Explainer } from "./ai/explain.js";
 import { loadPolicyFile } from "./policy/load.js";
-import { PolicyStore } from "./policy/store.js";
 import { handleMcp } from "./mcp-endpoint.js";
-import { createProxyServer } from "./proxy.js";
+import { createProxyServer, SERVER_INFO } from "./proxy.js";
 import { serveDashboard } from "./static.js";
 import { handleWebhook } from "./webhook-endpoint.js";
-import { WebhookStore } from "./webhooks.js";
+import { openWorkspace } from "./workspace.js";
 
 /** The built React dashboard (npm run build:web). */
 const DASHBOARD_DIR = process.env.HANDRAIL_DASHBOARD_DIR?.trim() || "web/dist";
@@ -41,52 +39,62 @@ async function main(): Promise<void> {
   await tokens.getToken(); // fail fast on bad credentials
   const upstream = await connectUpstream(config.paypalMcpUrl, tokens);
 
-  const db = new DatabaseSync(config.dbPath);
-  db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
-  const audit = new AuditChain(db);
-  const callLog = new CallLog(db, audit);
   const rest = new PayPalRest(config.paypalBaseUrl, tokens);
-  const webhooks = new WebhookStore(db, audit);
-  const approvals = new ApprovalStore(db, audit);
-  const operations = new OperationStore(db, config.idempotencyWindowMs);
-  const accounts = new AccountStore(db, audit);
-  const agentKeys = new AgentKeyStore(db, audit);
-  audit.start(Date.now());
-  if (config.demoAccess) {
-    const demo = accounts.ensureDemoUser(await hashPassword(demoPassword()), Date.now());
-    log(`Demo access on: "Try the demo" signs in as ${demo.name} (approver)`);
-  }
-  const policyStore = new PolicyStore(config.policyPath, audit, policy);
-  policyStore.recordLoaded(Date.now());
+  const direct = new PayPalDirect(config.paypalBaseUrl, tokens);
 
   // AI is advisory only: explanations for reviewers and drafting rules. The
   // gate's decisions never depend on it, and everything works without a key.
   const llm = config.anthropicApiKey ? new AnthropicLlm(config.anthropicApiKey, config.aiModel) : null;
   log(llm ? `AI features on (${config.aiModel})` : "AI features off: set ANTHROPIC_API_KEY to enable explanations and plain-English rules");
-  const explainer = new Explainer(llm, approvals, callLog, () => policyStore.get());
-  const gate = new Gate(
-    {
-      upstream,
-      rest,
-      direct: new PayPalDirect(config.paypalBaseUrl, tokens),
-      callLog,
-      approvals,
-      operations,
-      policy: () => policyStore.get(),
-      onHeld: (approval) => void explainer.explain(approval),
-    },
-    { approvalWaitMs: config.approvalWaitMs, approvalTtlMs: config.approvalTtlMs },
-  );
+
+  const shared = {
+    upstream,
+    rest,
+    direct,
+    llm,
+    approvalWaitMs: config.approvalWaitMs,
+    approvalTtlMs: config.approvalTtlMs,
+    idempotencyWindowMs: config.idempotencyWindowMs,
+  };
+
+  const db = new DatabaseSync(config.dbPath);
+  db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
+  const audit = new AuditChain(db);
+  const accounts = new AccountStore(db, audit);
+  const workspace = openWorkspace({ ...shared, db, audit, policy, policyPath: config.policyPath });
+  const { gate, callLog, webhooks, agentKeys } = workspace;
+
+  // The demo agent calls Handrail's own /mcp with its key, like any outside agent.
+  const host = process.env.HANDRAIL_HOST || "127.0.0.1";
+  const loopback = host === "0.0.0.0" || host === "::" ? "127.0.0.1" : host.includes(":") ? `[${host}]` : host;
+  const demo = config.demoAccess
+    ? new DemoService({
+        realDb: db,
+        // Each demo session starts from the policy in force, in memory, with nothing else.
+        open: () => {
+          const demoDb = new DatabaseSync(":memory:");
+          return openWorkspace({ ...shared, db: demoDb, audit: new AuditChain(demoDb), policy: workspace.policy.get(), policyPath: null });
+        },
+        connect: async (agentKey) => {
+          if (stdio) throw new Error("The demo agent needs Handrail running over HTTP (npm run dev), not stdio.");
+          const client = new Client({ name: "handrail-demo-agent", version: SERVER_INFO.version });
+          const url = new URL(`http://${loopback}:${config.port}/mcp`);
+          await client.connect(new StreamableHTTPClientTransport(url, { requestInit: { headers: { Authorization: `Bearer ${agentKey}` } } }));
+          return client;
+        },
+        createSale: (amount) => createDemoSale(config.paypalBaseUrl, tokens, amount),
+      })
+    : null;
+  if (config.demoAccess) {
+    const demoUser = accounts.ensureDemoUser(await hashPassword(demoPassword()), Date.now());
+    log(`Demo access on: "Try the demo" signs in as ${demoUser.name} (approver), in a separate workspace per session`);
+  }
 
   const adminApi = createAdminApi({
-    gate,
-    callLog,
-    webhooks,
-    audit,
-    policy: policyStore,
-    llm,
+    workspace,
     accounts,
-    agentKeys,
+    llm,
+    demo,
     adminToken: config.adminToken,
     demoAccess: config.demoAccess,
     trustProxy: config.trustProxy,
@@ -99,7 +107,6 @@ async function main(): Promise<void> {
   // The HTTP server always runs. It carries the admin API (approvals), the
   // PayPal webhook endpoint, and the agent-facing /mcp endpoint when not in
   // stdio mode. Binds to localhost unless HANDRAIL_HOST says otherwise.
-  const host = process.env.HANDRAIL_HOST || "127.0.0.1";
   const http = createServer(async (req, res) => {
     const path = new URL(req.url ?? "/", "http://localhost").pathname;
     if (path === "/health") {
@@ -111,6 +118,7 @@ async function main(): Promise<void> {
         rest,
         callLog,
         store: webhooks,
+        demo: demo && { routeWebhook: (ids) => demo.routeWebhook(ids) },
         webhookId: config.paypalWebhookId,
         allowUnverified: config.allowUnverifiedWebhooks,
       });
@@ -126,7 +134,7 @@ async function main(): Promise<void> {
       res.writeHead(404).end();
       return;
     }
-    await handleMcp(req, res, { upstream, gate, agentKeys, agentToken: config.agentToken });
+    await handleMcp(req, res, { upstream, gate, agentKeys, agentToken: config.agentToken, demo });
   });
 
   http.on("error", (err: NodeJS.ErrnoException) => {

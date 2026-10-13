@@ -16,6 +16,11 @@ import { AccountStore } from "../src/auth/accounts.js";
 import { AgentKeyStore } from "../src/auth/agent-keys.js";
 import { checkAdminToken } from "../src/auth/http.js";
 import { hashPassword } from "../src/auth/passwords.js";
+import { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { DemoService } from "../src/demo/workspaces.js";
+import { handleWebhook } from "../src/webhook-endpoint.js";
+import { openWorkspace } from "../src/workspace.js";
 import { Gate } from "../src/gate.js";
 import { OperationStore } from "../src/idempotency.js";
 import { handleMcp } from "../src/mcp-endpoint.js";
@@ -74,27 +79,66 @@ async function setup(opts: { demoAccess?: boolean; cookieSecure?: boolean | "aut
   );
   if (opts.demoAccess) accounts.ensureDemoUser(await hashPassword(demoPassword()), Date.now());
 
+  // Demo workspaces: like the real one, but each in its own in-memory database.
+  // Refunds "succeed" at a fake PayPal; sales are fake captures.
+  const demoSent: string[] = [];
+  let sales = 0;
+  let base = "";
+  const demo = opts.demoAccess
+    ? new DemoService({
+        realDb: db,
+        open: () => {
+          const demoDb = new DatabaseSync(":memory:");
+          return openWorkspace({
+            db: demoDb,
+            audit: new AuditChain(demoDb),
+            upstream,
+            rest: {} as PayPalRest,
+            direct: {
+              call: async (name: string) => {
+                demoSent.push(name);
+                return { content: [{ type: "text", text: JSON.stringify({ id: `REFUND${demoSent.length}`, status: "COMPLETED" }) }] };
+              },
+            },
+            llm: null,
+            policy: policy.get(),
+            policyPath: null,
+            approvalWaitMs: 0,
+            approvalTtlMs: 3_600_000,
+            idempotencyWindowMs: 3_600_000,
+          });
+        },
+        // The demo agent reaches the gate the way any agent does: MCP over HTTP with its key.
+        connect: async (key) => {
+          const client = new McpClient({ name: "demo-agent-test", version: "0" });
+          await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${key}` } } }));
+          return client;
+        },
+        createSale: async () => ({ orderId: `ORDER${++sales}`, captureId: `DEMOCAPTURE${sales}` }),
+      })
+    : null;
+  if (demo) after(() => demo.close());
+
   const api = createAdminApi({
-    gate,
-    callLog,
-    webhooks,
-    audit,
-    policy,
+    workspace: { gate, callLog, webhooks, audit, policy, agentKeys },
     llm: null,
     accounts,
-    agentKeys,
+    demo,
     adminToken: "adminToken" in opts ? opts.adminToken : ADMIN_TOKEN,
     demoAccess: !!opts.demoAccess,
     trustProxy: false,
     cookieSecure: opts.cookieSecure ?? "auto",
   });
   const server = createServer(async (req, res) => {
-    if (req.url === "/mcp") return handleMcp(req, res, { upstream, gate, agentKeys, agentToken: undefined });
+    if (req.url === "/mcp") return handleMcp(req, res, { upstream, gate, agentKeys, agentToken: undefined, demo });
+    if (req.url === "/webhooks/paypal") {
+      return handleWebhook(req, res, { rest: {} as PayPalRest, callLog, store: webhooks, webhookId: "WH-TEST", allowUnverified: true, demo });
+    }
     if (!(await api(req, res))) res.writeHead(404).end();
   });
   servers.push(server);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
   /** Holds a refund for approval, as if an agent had asked for it. */
   const heldRefund = () => {
@@ -109,7 +153,7 @@ async function setup(opts: { demoAccess?: boolean; cookieSecure?: boolean | "aut
     return approvals.create(facts, evaluation, Date.now(), 3_600_000);
   };
 
-  return { base, db, audit, accounts, agentKeys, callLog, approvals, policy, sent, heldRefund, browser: () => new Browser(base) };
+  return { base, db, audit, accounts, agentKeys, callLog, approvals, webhooks, policy, sent, demo, demoSent, heldRefund, browser: () => new Browser(base) };
 }
 
 /** A browser: keeps the session cookie, sends Origin, and echoes the CSRF token. */
@@ -429,11 +473,128 @@ describe("auth: demo access", () => {
     const res = await judge.req("POST", "/api/auth/demo");
     assert.equal(res.status, 200);
     assert.equal(res.data.user.role, "approver");
-    assert.equal((await judge.req("POST", `/api/approvals/${heldRefund().id}/approve`, {})).status, 200);
+    assert.equal((await judge.req("POST", `/api/approvals/${heldRefund().id}/approve`, {})).status, 404, "real approvals aren't visible to the demo");
     assert.equal((await judge.req("POST", "/api/me/password", { currentPassword: "x", newPassword: "something long enough" })).status, 403);
     assert.equal((await judge.req("PATCH", "/api/me", { name: "Hacker", email: "h@example.com" })).status, 403);
     assert.equal((await judge.req("GET", "/api/users")).status, 403);
     assert.equal((await browser().login("demo@handrail.example", "anything at all")).status, 401, "no password sign-in for the demo account");
+  });
+});
+
+describe("demo agent and demo isolation", () => {
+  async function signInDemo(ctx: Awaited<ReturnType<typeof setup>>) {
+    const judge = ctx.browser();
+    assert.equal((await judge.req("POST", "/api/auth/demo")).status, 200);
+    return judge;
+  }
+
+  async function runToEnd(judge: Browser) {
+    const started = await judge.req("POST", "/api/demo/run");
+    assert.equal(started.status, 202, JSON.stringify(started.data));
+    for (let i = 0; i < 100; i++) {
+      const { data } = await judge.req("GET", "/api/demo/run");
+      if (data.run.status !== "running") return data;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    throw new Error("demo run didn't finish");
+  }
+
+  it("runs a scripted agent through the gateway: allowed, held for approval, retry deduplicated", async () => {
+    const ctx = await setup({ demoAccess: true });
+    const judge = await signInDemo(ctx);
+    const status = await runToEnd(judge);
+
+    assert.equal(status.run.status, "done", JSON.stringify(status.run));
+    assert.deepEqual(
+      status.run.steps.map((s: { id: string; status: string }) => [s.id, s.status]),
+      [["sale", "done"], ["small", "done"], ["large", "done"], ["retry", "done"]],
+    );
+    assert.deepEqual(status.run.plan, { limit: "100.00", ruleId: "approve-over-100", small: "5.00", large: "120.00", sale: "125.00" });
+    assert.deepEqual(ctx.demoSent, ["create_refund"], "only the small refund reached PayPal");
+
+    const calls = (await judge.req("GET", "/api/calls")).data.reverse();
+    assert.deepEqual(
+      calls.map((c: { decision: string; agent_name: string }) => [c.decision, c.agent_name]),
+      [["allow", "Demo agent"], ["require_approval", "Demo agent"], ["duplicate", "Demo agent"]],
+    );
+    const pending = (await judge.req("GET", "/api/approvals?status=pending")).data;
+    assert.equal(pending.length, 1, "the retry didn't create a second approval");
+    assert.equal(pending[0].agent.name, "Demo agent");
+    assert.equal(status.approval.status, "pending");
+
+    const approved = await judge.req("POST", `/api/approvals/${pending[0].id}/approve`, {});
+    assert.equal(approved.data.status, "executed");
+    assert.equal(approved.data.decidedBy, "Demo Approver");
+    assert.deepEqual(ctx.demoSent, ["create_refund", "create_refund"]);
+    assert.equal((await judge.req("GET", "/api/audit/verify")).data.ok, true);
+
+    assert.deepEqual(ctx.sent, [], "nothing went through the real gate");
+    assert.equal(ctx.callLog.recent(10).length, 0);
+    assert.equal(ctx.approvals.list().length, 0);
+  });
+
+  it("limits runs to one a minute per session", async () => {
+    const ctx = await setup({ demoAccess: true });
+    const judge = await signInDemo(ctx);
+    await runToEnd(judge);
+    const again = await judge.req("POST", "/api/demo/run");
+    assert.equal(again.status, 429);
+    assert.ok(Number(again.headers.get("retry-after")) > 0);
+    assert.match(again.data.error, /once a minute/);
+  });
+
+  it("is only for the demo account", async () => {
+    const ctx = await setup({ demoAccess: true });
+    const admin = ctx.browser();
+    await admin.signup("Malcolm Clottey", "malcolm@example.com");
+    assert.equal((await admin.req("POST", "/api/demo/run")).status, 403);
+    assert.equal((await admin.req("GET", "/api/demo/run")).status, 403);
+    assert.equal((await fetch(`${ctx.base}/api/demo/run`, { method: "POST" })).status, 401);
+  });
+
+  it("gives each demo session its own data, separate from other judges and from real data", async () => {
+    const ctx = await setup({ demoAccess: true });
+    const admin = ctx.browser();
+    await admin.signup("Malcolm Clottey", "malcolm@example.com");
+    const realHeld = ctx.heldRefund().id;
+
+    const judgeA = await signInDemo(ctx);
+    const judgeB = await signInDemo(ctx);
+    await runToEnd(judgeA);
+
+    // B shares the demo account but not A's workspace, and neither sees real data.
+    assert.deepEqual((await judgeB.req("GET", "/api/calls")).data, []);
+    assert.deepEqual((await judgeB.req("GET", "/api/approvals")).data, []);
+    assert.equal((await judgeB.req("GET", `/api/approvals/${realHeld}`)).status, 404);
+    assert.equal((await judgeA.req("POST", `/api/approvals/${realHeld}/approve`, {})).status, 404);
+    assert.equal((await judgeB.req("GET", "/api/summary")).data.pendingApprovals, 0);
+
+    // Real users don't see demo activity.
+    assert.deepEqual((await admin.req("GET", "/api/calls")).data, []);
+    assert.deepEqual((await admin.req("GET", "/api/approvals")).data.map((a: { id: string }) => a.id), [realHeld]);
+    assert.ok(!(await admin.req("GET", "/api/agent-keys")).data.some((k: { name: string }) => k.name === "Demo agent"));
+
+    // PayPal's webhooks for the demo sale land in that demo workspace, not in real data.
+    const refunded = (id: string) => ({
+      id,
+      event_type: "PAYMENT.CAPTURE.REFUNDED",
+      resource: {
+        id: "REFUND1",
+        status: "COMPLETED",
+        amount: { currency_code: "USD", value: "5.00" },
+        links: [{ rel: "up", href: "https://api.sandbox.paypal.com/v2/payments/captures/DEMOCAPTURE1" }],
+      },
+    });
+    const post = (event: unknown) => fetch(`${ctx.base}/webhooks/paypal`, { method: "POST", body: JSON.stringify(event) });
+    assert.equal((await post(refunded("WH-1"))).status, 200);
+    assert.equal((await judgeA.req("GET", "/api/webhooks")).data.length, 1);
+    assert.equal(ctx.webhooks.list().length, 0);
+
+    // Once a demo workspace is discarded, late events for its sale are dropped, still not stored as real.
+    ctx.demo!.close();
+    assert.equal(ctx.demo!.size, 0);
+    assert.equal((await post(refunded("WH-2"))).status, 200);
+    assert.equal(ctx.webhooks.list().length, 0);
   });
 });
 

@@ -17,13 +17,15 @@ export class PolicyConflictError extends Error {}
  * If the file changes on disk (an edit by hand, or another Handrail process
  * saving a change from the dashboard), the next get() reloads it. An invalid
  * file is ignored and the previous policy stays in force.
+ *
+ * With no path (demo workspaces), the policy lives in memory only.
  */
 export class PolicyStore {
   private current: Policy;
   private mtimeMs: number;
 
   constructor(
-    private readonly path: string,
+    private readonly path: string | null,
     private readonly audit: AuditChain,
     initial: Policy,
   ) {
@@ -32,6 +34,7 @@ export class PolicyStore {
   }
 
   get(): Policy {
+    if (this.path === null) return this.current;
     const mtimeMs = this.fileMtime();
     if (mtimeMs !== this.mtimeMs) {
       this.mtimeMs = mtimeMs;
@@ -50,6 +53,7 @@ export class PolicyStore {
   }
 
   private fileMtime(): number {
+    if (this.path === null) return 0;
     try {
       return statSync(this.path).mtimeMs;
     } catch {
@@ -82,10 +86,12 @@ export class PolicyStore {
     const before = new Map(this.current.rules.map((r) => [r.id, canonicalJson(r)]));
     const after = new Map(next.rules.map((r) => [r.id, canonicalJson(r)]));
 
-    const tmp = `${this.path}.tmp-${process.pid}`;
-    writeFileSync(tmp, JSON.stringify(next, null, 2) + "\n");
-    renameSync(tmp, this.path);
-    this.mtimeMs = this.fileMtime();
+    if (this.path !== null) {
+      const tmp = `${this.path}.tmp-${process.pid}`;
+      writeFileSync(tmp, JSON.stringify(next, null, 2) + "\n");
+      renameSync(tmp, this.path);
+      this.mtimeMs = this.fileMtime();
+    }
 
     const previousHash = policyHash(this.current);
     this.current = next;

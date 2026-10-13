@@ -73,6 +73,7 @@ export class DecisionError extends Error {
 export class Gate {
   private readonly events = new EventEmitter();
   private readonly now: () => number;
+  private readonly expiryTimer: NodeJS.Timeout;
 
   constructor(
     private readonly deps: GateDeps,
@@ -81,7 +82,12 @@ export class Gate {
     this.now = options.now ?? Date.now;
     this.events.setMaxListeners(0);
     this.recoverInterrupted();
-    setInterval(() => this.expireOverdue(), 30_000).unref();
+    this.expiryTimer = setInterval(() => this.expireOverdue(), 30_000).unref();
+  }
+
+  /** Stops the expiry timer (for gates that are discarded, like demo workspaces). */
+  close(): void {
+    clearInterval(this.expiryTimer);
   }
 
   /** `agent` is who made the call (an agent key, or the local stdio agent); it's recorded, never trusted for decisions. */

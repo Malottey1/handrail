@@ -13,6 +13,8 @@ export interface McpEndpointDeps {
   agentKeys: AgentKeyStore;
   /** Optional shared key from .env (HANDRAIL_AGENT_TOKEN), recorded as its own agent. */
   agentToken: string | undefined;
+  /** Demo workspaces: their "Demo agent" keys reach their own gate, never the real one. */
+  demo?: { authenticateAgent(secret: string): { agent: AgentIdentity; gate: Gate } | null } | null;
   now?: () => number;
 }
 
@@ -45,7 +47,10 @@ export async function handleMcp(req: IncomingMessage, res: ServerResponse, deps:
     res.writeHead(405, { Allow: "POST" }).end();
     return;
   }
-  const agent = authenticateAgent(req, deps);
+  const real = authenticateAgent(req, deps);
+  const demo = real ? null : deps.demo?.authenticateAgent(bearer(req) ?? "");
+  const agent = real ?? demo?.agent;
+  const gate = demo?.gate ?? deps.gate;
   if (!agent) {
     json(res, 401, { error: "Missing, unknown or revoked agent key. Create one in the dashboard (Admin > Agent keys)." }, { "WWW-Authenticate": "Bearer" });
     return;
@@ -53,7 +58,7 @@ export async function handleMcp(req: IncomingMessage, res: ServerResponse, deps:
 
   try {
     const body = await readJson(req);
-    const server = createProxyServer(deps.upstream, deps.gate, agent);
+    const server = createProxyServer(deps.upstream, gate, agent);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     res.on("close", () => {
       void transport.close();

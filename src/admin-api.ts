@@ -3,10 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { CompileError, compilePolicy } from "./ai/compile.js";
 import type { Llm } from "./ai/llm.js";
 import type { Approval, ApprovalStatus } from "./approvals.js";
-import type { AuditChain } from "./audit-chain.js";
-import type { CallLog } from "./audit.js";
 import { AccountError, hasRole, normalizeEmail, normalizeName, ROLES, type AccountStore, type Role, type User } from "./auth/accounts.js";
-import type { AgentKeyStore } from "./auth/agent-keys.js";
 import {
   authenticate,
   clearSessionCookie,
@@ -20,22 +17,25 @@ import {
 } from "./auth/http.js";
 import { hashPassword, passwordProblem, verifyPassword } from "./auth/passwords.js";
 import { FailureLimiter } from "./auth/rate-limit.js";
-import { DecisionError, type Gate } from "./gate.js";
-import { PolicyConflictError, type PolicyStore } from "./policy/store.js";
-import type { MatchStatus, WebhookStore } from "./webhooks.js";
+import { DemoError, type DemoService } from "./demo/workspaces.js";
+import { DecisionError } from "./gate.js";
+import { PolicyConflictError } from "./policy/store.js";
+import type { MatchStatus } from "./webhooks.js";
+import type { Workspace } from "./workspace.js";
+
+/** The parts of a workspace the API reads and changes. */
+export type ApiWorkspace = Pick<Workspace, "gate" | "callLog" | "webhooks" | "audit" | "policy" | "agentKeys">;
 
 export interface AdminDeps extends HttpOptions {
-  gate: Gate;
-  callLog: CallLog;
-  webhooks: WebhookStore;
-  audit: AuditChain;
-  policy: PolicyStore;
+  /** Real data. Demo sessions never see it. */
+  workspace: ApiWorkspace;
   accounts: AccountStore;
-  agentKeys: AgentKeyStore;
   /** For compiling plain-English rules. Null when AI features are off. */
   llm: Llm | null;
-  /** Offer "Try the demo" (sign in as the shared demo approver). */
+  /** Offer "Try the demo" (sign in as the demo approver). */
   demoAccess: boolean;
+  /** Per-session demo workspaces and the demo agent. Demo sessions are refused without it. */
+  demo?: DemoService | null;
   now?: () => number;
 }
 
@@ -104,13 +104,13 @@ function present(a: Approval) {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-function summary(deps: AdminDeps) {
-  const counts = deps.callLog.counts(Date.now() - DAY_MS);
+function summary(ws: ApiWorkspace) {
+  const counts = ws.callLog.counts(Date.now() - DAY_MS);
   const total = (match: (c: { decision: string; outcome: string | null }) => boolean) =>
     counts.filter(match).reduce((sum, c) => sum + c.n, 0);
-  const webhooks = deps.webhooks.list(undefined, 1000);
+  const webhooks = ws.webhooks.list(undefined, 1000);
   return {
-    pendingApprovals: deps.gate.listApprovals("pending").length,
+    pendingApprovals: ws.gate.listApprovals("pending").length,
     last24h: {
       calls: total(() => true),
       forwarded: total((c) => c.decision !== "duplicate" && c.outcome !== "held" && c.outcome !== "blocked"),
@@ -139,7 +139,7 @@ type Route = {
   /** Path segments after /api; ":x" matches any one segment. */
   path: string;
   role: Role;
-  handle: (ctx: Ctx & { principal: Principal; params: string[] }) => Promise<void> | void;
+  handle: (ctx: Ctx & { principal: Principal; params: string[]; ws: ApiWorkspace }) => Promise<void> | void;
 };
 
 function match(route: Route, method: string, parts: string[]): string[] | null {
@@ -174,6 +174,7 @@ const actorRef = (principal: Principal) => ({ id: principal.user.id, name: princ
  * viewer:   GET  /api/summary, /api/approvals[/:id], /api/calls, /api/webhooks,
  *                /api/audit, /api/audit/verify, /api/policy
  *           POST /api/auth/logout; PATCH /api/me; POST /api/me/password
+ *           GET/POST /api/demo/run (demo account only: the demo agent)
  * approver: POST /api/approvals/:id/approve | reject
  * admin:    POST /api/policy/compile; PUT /api/policy
  *           GET/PATCH /api/users[/:id]; GET/POST/DELETE /api/invites[/:id]
@@ -181,6 +182,8 @@ const actorRef = (principal: Principal) => ({ id: principal.user.id, name: princ
  *
  * Every route but the public ones requires a session cookie (plus the CSRF
  * header on changes) or the HANDRAIL_ADMIN_TOKEN bearer token, and its role.
+ * The demo account's routes read and change its own demo workspace instead
+ * of real data.
  */
 export function createAdminApi(deps: AdminDeps): (req: IncomingMessage, res: ServerResponse) => Promise<boolean> {
   const clock = deps.now ?? Date.now;
@@ -278,6 +281,14 @@ export function createAdminApi(deps: AdminDeps): (req: IncomingMessage, res: Ser
 
   // ---- signed-in routes
 
+  /** The demo agent is only for the demo account, in its own workspace. */
+  function demoOf(principal: Principal): { demo: DemoService; session: string } {
+    if (principal.kind !== "session" || !principal.user.isDemo || !deps.demo) {
+      throw new HttpError(403, "The demo agent is only available to the demo account.");
+    }
+    return { demo: deps.demo, session: principal.token };
+  }
+
   const routes: Route[] = [
     { method: "POST", path: "auth/logout", role: "viewer", handle: ({ req, res, principal }) => {
       if (principal.kind === "session") deps.accounts.deleteSession(principal.token);
@@ -309,63 +320,63 @@ export function createAdminApi(deps: AdminDeps): (req: IncomingMessage, res: Ser
       send(res, 200, { ok: true });
     } },
 
-    { method: "GET", path: "summary", role: "viewer", handle: ({ res }) => send(res, 200, summary(deps)) },
+    { method: "GET", path: "summary", role: "viewer", handle: ({ res, ws }) => send(res, 200, summary(ws)) },
 
-    { method: "GET", path: "approvals", role: "viewer", handle: ({ res, url }) => {
+    { method: "GET", path: "approvals", role: "viewer", handle: ({ res, url, ws }) => {
       const status = url.searchParams.get("status") as ApprovalStatus | null;
       if (status && !STATUSES.has(status)) throw new HttpError(400, `Unknown status ${status}`);
-      send(res, 200, deps.gate.listApprovals(status ?? undefined).map(present));
+      send(res, 200, ws.gate.listApprovals(status ?? undefined).map(present));
     } },
 
-    { method: "GET", path: "approvals/:id", role: "viewer", handle: ({ res, params }) => {
-      const approval = deps.gate.getApproval(params[0]!);
+    { method: "GET", path: "approvals/:id", role: "viewer", handle: ({ res, params, ws }) => {
+      const approval = ws.gate.getApproval(params[0]!);
       approval ? send(res, 200, present(approval)) : send(res, 404, { error: "Not found" });
     } },
 
     ...(["approve", "reject"] as const).map(
-      (action): Route => ({ method: "POST", path: `approvals/:id/${action}`, role: "approver", handle: async ({ req, res, principal, params }) => {
+      (action): Route => ({ method: "POST", path: `approvals/:id/${action}`, role: "approver", handle: async ({ req, res, principal, params, ws }) => {
         const body = await readBody(req);
         const by = actorOf(principal, body);
         const note = text(body.note, 500);
-        const approval = action === "approve" ? await deps.gate.approve(params[0]!, by, note) : deps.gate.reject(params[0]!, by, note);
+        const approval = action === "approve" ? await ws.gate.approve(params[0]!, by, note) : ws.gate.reject(params[0]!, by, note);
         send(res, 200, present(approval));
       } }),
     ),
 
-    { method: "GET", path: "calls", role: "viewer", handle: ({ res, url }) => {
+    { method: "GET", path: "calls", role: "viewer", handle: ({ res, url, ws }) => {
       const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 50, 1), 500);
-      send(res, 200, deps.callLog.recent(limit));
+      send(res, 200, ws.callLog.recent(limit));
     } },
 
-    { method: "GET", path: "webhooks", role: "viewer", handle: ({ res, url }) => {
+    { method: "GET", path: "webhooks", role: "viewer", handle: ({ res, url, ws }) => {
       const status = (url.searchParams.get("status") as MatchStatus | null) ?? undefined;
-      send(res, 200, deps.webhooks.list(status).map(({ reasons_json, ...e }) => ({ ...e, reasons: JSON.parse(reasons_json) })));
+      send(res, 200, ws.webhooks.list(status).map(({ reasons_json, ...e }) => ({ ...e, reasons: JSON.parse(reasons_json) })));
     } },
 
-    { method: "GET", path: "audit", role: "viewer", handle: ({ res, url }) => {
+    { method: "GET", path: "audit", role: "viewer", handle: ({ res, url, ws }) => {
       const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 100, 1), 1000);
-      const rows = deps.audit.list(limit, url.searchParams.get("ref") ?? undefined);
+      const rows = ws.audit.list(limit, url.searchParams.get("ref") ?? undefined);
       send(res, 200, rows.map(({ data_json, ...r }) => ({ ...r, data: JSON.parse(data_json) })));
     } },
 
-    { method: "GET", path: "audit/verify", role: "viewer", handle: ({ res }) => send(res, 200, deps.audit.verify()) },
+    { method: "GET", path: "audit/verify", role: "viewer", handle: ({ res, ws }) => send(res, 200, ws.audit.verify()) },
 
-    { method: "GET", path: "policy", role: "viewer", handle: ({ res }) =>
-      send(res, 200, { policy: deps.policy.get(), hash: deps.policy.hash(), ai: { enabled: !!deps.llm, model: deps.llm?.model ?? null } }) },
+    { method: "GET", path: "policy", role: "viewer", handle: ({ res, ws }) =>
+      send(res, 200, { policy: ws.policy.get(), hash: ws.policy.hash(), ai: { enabled: !!deps.llm, model: deps.llm?.model ?? null } }) },
 
-    { method: "POST", path: "policy/compile", role: "admin", handle: async ({ req, res }) => {
+    { method: "POST", path: "policy/compile", role: "admin", handle: async ({ req, res, ws }) => {
       if (!deps.llm) throw new HttpError(503, "AI features are off: set ANTHROPIC_API_KEY in .env");
       const body = await readBody(req);
-      const baseHash = deps.policy.hash();
-      const proposal = await compilePolicy(typeof body.instruction === "string" ? body.instruction : "", deps.policy.get(), deps.llm);
+      const baseHash = ws.policy.hash();
+      const proposal = await compilePolicy(typeof body.instruction === "string" ? body.instruction : "", ws.policy.get(), deps.llm);
       send(res, 200, { ...proposal, baseHash, model: deps.llm.model });
     } },
 
-    { method: "PUT", path: "policy", role: "admin", handle: async ({ req, res, principal }) => {
+    { method: "PUT", path: "policy", role: "admin", handle: async ({ req, res, principal, ws }) => {
       const body = await readBody(req);
       const by = actorOf(principal, body);
       try {
-        deps.policy.replace(body.policy, {
+        ws.policy.replace(body.policy, {
           by: by.name,
           byId: by.id,
           source: text(body.source, 1000),
@@ -377,7 +388,18 @@ export function createAdminApi(deps: AdminDeps): (req: IncomingMessage, res: Ser
         if (err instanceof Error && err.message.startsWith("Invalid policy")) throw new HttpError(400, err.message);
         throw err;
       }
-      send(res, 200, { policy: deps.policy.get(), hash: deps.policy.hash() });
+      send(res, 200, { policy: ws.policy.get(), hash: ws.policy.hash() });
+    } },
+
+    { method: "GET", path: "demo/run", role: "viewer", handle: ({ res, principal }) => {
+      const { demo, session } = demoOf(principal);
+      send(res, 200, demo.status(session));
+    } },
+
+    { method: "POST", path: "demo/run", role: "viewer", handle: ({ req, res, principal }) => {
+      const { demo, session } = demoOf(principal);
+      demo.start(session, clientIp(req, deps));
+      send(res, 202, demo.status(session));
     } },
 
     { method: "GET", path: "users", role: "admin", handle: ({ res }) => send(res, 200, deps.accounts.list().map(publicUser)) },
@@ -408,16 +430,16 @@ export function createAdminApi(deps: AdminDeps): (req: IncomingMessage, res: Ser
       send(res, 200, { ok: true });
     } },
 
-    { method: "GET", path: "agent-keys", role: "admin", handle: ({ res }) => send(res, 200, deps.agentKeys.list()) },
+    { method: "GET", path: "agent-keys", role: "admin", handle: ({ res, ws }) => send(res, 200, ws.agentKeys.list()) },
 
-    { method: "POST", path: "agent-keys", role: "admin", handle: async ({ req, res, principal, now }) => {
+    { method: "POST", path: "agent-keys", role: "admin", handle: async ({ req, res, principal, now, ws }) => {
       const body = await readBody(req);
-      const { key, secret } = deps.agentKeys.create(typeof body.name === "string" ? body.name : "", actorRef(principal), now);
+      const { key, secret } = ws.agentKeys.create(typeof body.name === "string" ? body.name : "", actorRef(principal), now);
       send(res, 201, { key, secret });
     } },
 
-    { method: "DELETE", path: "agent-keys/:id", role: "admin", handle: ({ res, principal, params, now }) =>
-      send(res, 200, deps.agentKeys.revoke(params[0]!, actorRef(principal), now)) },
+    { method: "DELETE", path: "agent-keys/:id", role: "admin", handle: ({ res, principal, params, now, ws }) =>
+      send(res, 200, ws.agentKeys.revoke(params[0]!, actorRef(principal), now)) },
   ];
 
   return async (req, res) => {
@@ -433,6 +455,13 @@ export function createAdminApi(deps: AdminDeps): (req: IncomingMessage, res: Ser
       if (!principal) throw new HttpError(401, "Sign in first");
       if (!csrfOk(req, principal)) throw new HttpError(403, "Missing or wrong CSRF token. Reload the page and try again.");
 
+      // Demo sessions get their own workspace; they never see or change real data.
+      let ws = deps.workspace;
+      if (principal.kind === "session" && principal.user.isDemo) {
+        if (!deps.demoAccess || !deps.demo) throw new HttpError(403, "Demo access is turned off.");
+        ws = deps.demo.workspace(principal.token);
+      }
+
       const method = req.method ?? "GET";
       for (const route of routes) {
         const params = match(route, method, ctx.parts);
@@ -440,7 +469,7 @@ export function createAdminApi(deps: AdminDeps): (req: IncomingMessage, res: Ser
         if (!hasRole(principal.user.role, route.role)) {
           throw new HttpError(403, `This needs the ${route.role} role; you are ${principal.user.role === "admin" ? "an" : "a"} ${principal.user.role}.`);
         }
-        await route.handle({ ...ctx, principal, params });
+        await route.handle({ ...ctx, principal, params, ws });
         return true;
       }
       throw new HttpError(404, "Not found");
@@ -448,6 +477,9 @@ export function createAdminApi(deps: AdminDeps): (req: IncomingMessage, res: Ser
       if (err instanceof HttpError) send(res, err.status, { error: err.message }, err.headers);
       else if (err instanceof AccountError) send(res, err.status, { error: err.message });
       else if (err instanceof DecisionError) send(res, err.status, { error: err.message });
+      else if (err instanceof DemoError) {
+        send(res, err.status, { error: err.message }, err.retryAfterSeconds ? { "Retry-After": String(err.retryAfterSeconds) } : {});
+      }
       else if (err instanceof CompileError) send(res, 422, { error: err.message });
       else if (err instanceof Error && err.name.endsWith("APIError")) send(res, 502, { error: `AI request failed: ${err.message}` });
       else if (err instanceof SyntaxError) send(res, 400, { error: "Body must be JSON" });
