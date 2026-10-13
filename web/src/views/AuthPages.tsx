@@ -67,6 +67,9 @@ export function LoginPage({ auth, onSignedIn }: { auth: AuthState; onSignedIn: S
 
   return (
     <AuthShell title="Sign in" lede="Review held agent payments and see everything your agent did with PayPal.">
+      {new URLSearchParams(location.search).get("next")?.startsWith("/app#approvals/") && (
+        <p className="notice">Sign in to review the held call from your alert. You'll go straight to it.</p>
+      )}
       {auth.setupRequired && (
         <p className="notice">
           No accounts yet. <a {...link("/signup")}>Create the admin account</a> to get started.

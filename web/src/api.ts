@@ -13,6 +13,8 @@ export interface User {
   isDemo: boolean;
   createdAt: string;
   disabled: boolean;
+  /** Gets an email when a call is held (approvers and admins). Always false for the demo account. */
+  emailAlerts: boolean;
 }
 
 /** The signed-in user. The session itself is an httpOnly cookie; the CSRF token goes in a header on changes. */
@@ -130,6 +132,34 @@ export interface Approval {
   explanation: Explanation | null;
   explanationStatus: "pending" | "ready" | "failed" | "unavailable" | null;
   explanationModel: string | null;
+  /** The held-call alert for this approval, once it went out (or was previewed, in a demo). */
+  alert: AlertInfo | null;
+}
+
+export type AlertStatus = "sent" | "partial" | "failed" | "off" | "nobody" | "skipped" | "preview";
+
+export interface AlertInfo {
+  status: AlertStatus;
+  at: string;
+  /** Names of the people emailed. */
+  emailedTo: string[];
+  emailFailed: number;
+  slack: "sent" | "failed" | null;
+  /** Demo workspaces: the message approvers would have got. */
+  preview: { subject: string; text: string } | null;
+}
+
+export interface AlertChannels {
+  mode: "live" | "preview";
+  email: boolean;
+  slack: boolean;
+}
+
+export interface AlertSettings {
+  email: { configured: boolean; provider: string | null };
+  slack: { set: boolean; masked: string | null; updatedAt: number | null; updatedBy: string | null };
+  /** Names of the approvers and admins who get emails. */
+  recipients: string[];
 }
 
 export interface Explanation {
@@ -197,8 +227,9 @@ export interface VerifyResult {
 
 export interface Summary {
   pendingApprovals: number;
-  last24h: { calls: number; forwarded: number; held: number; blocked: number; duplicates: number; failed: number };
+  last24h: { calls: number; forwarded: number; held: number; expired: number; blocked: number; duplicates: number; failed: number };
   webhooks: { total: number; flagged: number };
+  alerts: AlertChannels;
 }
 
 export interface PolicyResponse {

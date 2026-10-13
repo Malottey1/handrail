@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, ApiError, can, type AuthState, type Session, type Summary, type User, type VerifyResult } from "./api";
+import { api, ApiError, can, type AlertChannels, type AuthState, type Session, type Summary, type User, type VerifyResult } from "./api";
 import { Logo, ThemeToggle, usePoll } from "./components";
 import { link, navigate, usePath } from "./router";
 import { AccountView } from "./views/Account";
@@ -56,13 +56,14 @@ export function App() {
   const session: Session | null = auth.user && auth.csrfToken ? { user: auth.user, csrfToken: auth.csrfToken } : null;
   const signedIn = (s: Session) => {
     setAuth({ ...auth, user: s.user, csrfToken: s.csrfToken, setupRequired: false });
-    navigate("/app");
+    navigate(nextPath());
   };
 
-  if (path === "/login") return session ? <Redirect to="/app" /> : <LoginPage auth={auth} onSignedIn={signedIn} />;
+  if (path === "/login") return session ? <Redirect to={nextPath()} /> : <LoginPage auth={auth} onSignedIn={signedIn} />;
   if (path === "/signup") return session ? <Redirect to="/app" /> : <SignupPage auth={auth} onSignedIn={signedIn} />;
   if (path === "/app") {
-    if (!session) return <Redirect to="/login" />;
+    // Signed out (e.g. opening an alert's link): sign in, then come back to the same place.
+    if (!session) return <Redirect to={`/login?next=${encodeURIComponent(`/app${location.hash}`)}`} />;
     return (
       <Dashboard
         session={session}
@@ -78,20 +79,36 @@ export function App() {
   return <HomePage auth={auth} session={session} onSignedIn={signedIn} />;
 }
 
+/** Where to go after signing in: the dashboard, or the dashboard link that sent you to sign in. */
+function nextPath(): string {
+  const next = new URLSearchParams(location.search).get("next");
+  return next && /^\/app(#[\w/-]*)?$/.test(next) ? next : "/app";
+}
+
 function Redirect({ to }: { to: string }) {
   useEffect(() => navigate(to, { replace: true }), [to]);
   return null;
 }
 
+/** "#activity" -> the Activity tab; "#approvals/apr_…" -> the Approvals tab, focused on that approval (links in alerts). */
 function tabFromHash(): Tab {
-  const t = location.hash.slice(1) as Tab;
+  const t = location.hash.slice(1).split("/")[0] as Tab;
   return TABS.includes(t) ? t : "approvals";
+}
+
+function focusFromHash(): string | null {
+  const [t, id] = location.hash.slice(1).split("/");
+  return t === "approvals" && id && /^apr_[a-z0-9]+$/.test(id) ? id : null;
 }
 
 function Dashboard({ session, onSignOut, onUserChange }: { session: Session; onSignOut: () => void; onUserChange: (u: User) => void }) {
   const [tab, setTab] = useState<Tab>(tabFromHash);
+  const [focus, setFocus] = useState<string | null>(focusFromHash);
   useEffect(() => {
-    const onHash = () => setTab(tabFromHash());
+    const onHash = () => {
+      setTab(tabFromHash());
+      setFocus(focusFromHash());
+    };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
@@ -117,6 +134,7 @@ function Dashboard({ session, onSignOut, onUserChange }: { session: Session; onS
           <span className="env">Sandbox</span>
         </a>
         <IntegrityBadge verify={verify.data} error={verify.error} onClick={() => (location.hash = "audit")} />
+        {s && <AlertsChip alerts={s.alerts} />}
         <div className="who">
           <a className={`user-chip ${shown === "account" ? "active" : ""}`} href="#account" title="Your account">
             <span className="avatar" aria-hidden="true">
@@ -161,7 +179,7 @@ function Dashboard({ session, onSignOut, onUserChange }: { session: Session; onS
       </nav>
 
       <main className="main">
-        {shown === "approvals" && <ApprovalsView session={session} onChange={summary.refresh} />}
+        {shown === "approvals" && <ApprovalsView session={session} onChange={summary.refresh} focus={focus} />}
         {shown === "activity" && <ActivityView session={session} />}
         {shown === "webhooks" && <WebhooksView session={session} />}
         {shown === "audit" && <AuditView session={session} verify={verify.data} />}
@@ -187,6 +205,22 @@ function Stat({ label, value, tone }: { label: string; value: number | undefined
       <span className="stat-value">{value ?? "–"}</span>
       <span className="stat-label">{label}</span>
     </div>
+  );
+}
+
+/** Whether held calls alert anyone. Links to Account, where alerts are set up. */
+function AlertsChip({ alerts }: { alerts: AlertChannels }) {
+  const [label, tone, title] =
+    alerts.mode === "preview"
+      ? ["Alerts: preview only", "info", "Demo workspace: alerts are shown on each held call instead of being sent."]
+      : alerts.email || alerts.slack
+        ? [`Alerts on: ${[alerts.email && "email", alerts.slack && "Slack"].filter(Boolean).join(" + ")}`, "ok", "Approvers are alerted when a call is held."]
+        : ["Alerts off", "off", "Nobody is alerted when a call is held. Set up email or Slack in Account."];
+  return (
+    <a className={`alerts-chip alerts-${tone}`} href="#account" title={title}>
+      <span className="dot" aria-hidden="true" />
+      {label}
+    </a>
   );
 }
 

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { api, ApiError, can, type Decision, type Policy, type PolicyProposal, type PolicyResponse, type Session } from "../api";
 import { DecisionPill, JsonBlock, Mono, usePoll } from "../components";
 import { describeRule } from "../format";
@@ -80,6 +80,8 @@ export function PolicyView({ session }: { session: Session }) {
           ))}
         </ul>
       </section>
+
+      <HoldExpiry policy={data.policy} isAdmin={isAdmin} onSave={save} />
 
       <section className="card">
         <h2 className="section-title">When no rule matches</h2>
@@ -241,6 +243,61 @@ function Composer({
           </div>
         </div>
       )}
+    </section>
+  );
+}
+
+/** Matches DEFAULT_EXPIRE_AFTER_HOURS in src/policy/types.ts. */
+const DEFAULT_EXPIRE_AFTER_HOURS = 24;
+
+/** How long a held call waits for a human before it expires (never sent to PayPal). Part of the policy. */
+function HoldExpiry({ policy, isAdmin, onSave }: { policy: Policy; isAdmin: boolean; onSave: (next: Policy, source: string) => Promise<string | null> }) {
+  const current = policy.approvals?.expireAfterHours ?? DEFAULT_EXPIRE_AFTER_HOURS;
+  const [hours, setHours] = useState(String(current));
+  const [state, setState] = useState<{ tone: string; text: string } | null>(null);
+  const value = Number(hours);
+  const valid = Number.isFinite(value) && value >= 1 && value <= 720;
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    const error = await onSave({ ...policy, approvals: { expireAfterHours: value } }, `Held calls expire after ${value} hours`);
+    setState(error ? { tone: "bad", text: error } : { tone: "good", text: `Saved. Calls held from now on expire after ${value} hours.` });
+  }
+
+  return (
+    <section className="card">
+      <h2 className="section-title">Held calls</h2>
+      <p className="section-help">
+        A held call that nobody approves or rejects within{" "}
+        <strong>
+          {current} hour{current === 1 ? "" : "s"}
+        </strong>{" "}
+        expires. Expired calls are never sent to PayPal, the agent is told, and the log records it.
+        {policy.approvals ? "" : " (The default.)"}
+      </p>
+      {isAdmin && (
+        <form className="inline-form" onSubmit={submit}>
+          <label className="inline-label">
+            Expire after
+            <input
+              className="input input-sm"
+              type="number"
+              min={1}
+              max={720}
+              step="any"
+              value={hours}
+              onChange={(e) => setHours(e.target.value)}
+              aria-invalid={!valid}
+            />
+            hours
+          </label>
+          <button className="btn btn-secondary" disabled={!valid || value === current}>
+            Save
+          </button>
+        </form>
+      )}
+      {isAdmin && !valid && <p className="error">Enter a number of hours from 1 to 720 (30 days).</p>}
+      {state && <p className={`outcome outcome-${state.tone}`}>{state.text}</p>}
     </section>
   );
 }

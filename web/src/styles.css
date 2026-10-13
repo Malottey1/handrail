@@ -1893,3 +1893,161 @@ a.btn {
     flex-direction: column;
   }
 }
+
+/* Held-call alerts */
+
+.alerts-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 13px;
+  border-radius: 999px;
+  padding: 5px 12px;
+  text-decoration: none;
+  border: 1px solid transparent;
+}
+
+.alerts-chip .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.alerts-ok {
+  color: var(--good);
+  background: var(--good-bg);
+}
+
+.alerts-off {
+  color: var(--muted);
+  background: var(--muted-bg);
+  border-color: var(--line);
+}
+
+.alerts-info {
+  color: var(--info);
+  background: var(--info-bg);
+}
+
+.alert-line {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.alert-line-off {
+  color: var(--muted);
+}
+
+.alert-line-bad {
+  color: var(--bad);
+}
+
+.alert-preview {
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 13px;
+  background: var(--surface-2);
+}
+
+.alert-preview summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--info);
+}
+
+.alert-preview-subject {
+  font-weight: 600;
+  margin: 8px 0 4px;
+}
+
+.alert-preview pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: inherit;
+  color: var(--ink-2);
+}
+
+.approval-card.focused {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.focused-approval {
+  grid-column: 1 / -1;
+  border-left: 4px solid var(--brand);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.focused-head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.focused-title {
+  margin: 0;
+  font-size: 18px;
+}
+
+.toggle {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  cursor: pointer;
+}
+
+.toggle input {
+  margin-top: 3px;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--brand);
+}
+
+.toggle > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-weight: 500;
+}
+
+.toggle-disabled {
+  cursor: default;
+  opacity: 0.75;
+}
+
+.settings-kv {
+  margin: 4px 0 12px;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.inline-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.inline-label .input-sm {
+  width: 90px;
+}
+
+@media (max-width: 640px) {
+  .alerts-chip {
+    font-size: 12px;
+    padding: 4px 10px;
+  }
+}

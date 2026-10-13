@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { api, ApiError, can, type Approval, type Session } from "../api";
+import { useEffect, useRef, useState } from "react";
+import { api, ApiError, can, type AlertInfo, type Approval, type Session } from "../api";
 import { DecisionPill, Empty, Mono, Pill, StatusPill, useNow, usePoll } from "../components";
 import { countdown, formatMoney, paypalSummary, timeAgo, toolLabel } from "../format";
 import { DemoAgentPanel } from "./DemoAgent";
@@ -16,7 +16,7 @@ function keyArgs(args: Record<string, unknown>): Array<[string, string]> {
   return rows;
 }
 
-export function ApprovalsView({ session, onChange }: { session: Session; onChange: () => void }) {
+export function ApprovalsView({ session, onChange, focus }: { session: Session; onChange: () => void; focus: string | null }) {
   const pending = usePoll(() => api<Approval[]>(session, "/approvals?status=pending"), 2000);
   const all = usePoll(() => api<Approval[]>(session, "/approvals"), 5000);
   const now = useNow();
@@ -36,6 +36,7 @@ export function ApprovalsView({ session, onChange }: { session: Session; onChang
   return (
     <div className="approvals">
       {session.user.isDemo && <DemoAgentPanel session={session} onActivity={refresh} />}
+      {focus && !cards.some((c) => c.id === focus) && <FocusedApproval session={session} id={focus} now={now} />}
       <section>
         <h2 className="section-title">
           Waiting for you <span className="count">{pending.data?.length ?? 0}</span>
@@ -48,6 +49,7 @@ export function ApprovalsView({ session, onChange }: { session: Session; onChang
           {cards.map((a) => (
             <ApprovalCard
               key={a.id}
+              focused={a.id === focus}
               approval={a}
               session={session}
               now={now}
@@ -159,13 +161,77 @@ function AiBrief({ approval: a }: { approval: Approval }) {
   );
 }
 
+/**
+ * The approval an alert linked to, when it's no longer waiting (decided,
+ * expired, or not in this workspace): what happened to it.
+ */
+function FocusedApproval({ session, id, now }: { session: Session; id: string; now: number }) {
+  const found = usePoll(() => api<Approval>(session, `/approvals/${id}`), 5000);
+  if (!found.data && !found.error) return null;
+  const a = found.data;
+  if (a?.status === "pending") return null; // shown in the list below, highlighted
+  const what = !a
+    ? "This held call wasn't found. It may belong to another workspace, or the link is wrong."
+    : a.status === "expired"
+      ? "Nobody decided in time, so it expired. It was not sent to PayPal."
+      : a.decidedBy
+        ? `${a.status === "rejected" ? "Rejected" : "Approved"} by ${a.decidedBy}${a.decidedAt ? ` ${timeAgo(a.decidedAt, now)}` : ""}.`
+        : "It's no longer waiting for a decision.";
+  return (
+    <section className="card focused-approval" aria-live="polite">
+      <div className="focused-head">
+        <p className="card-kicker">From your alert</p>
+        {a && <StatusPill status={a.status} />}
+      </div>
+      {a && (
+        <p className="focused-title">
+          <strong>{toolLabel(a.tool)}</strong> {formatMoney(a.amount)}
+        </p>
+      )}
+      <p>{what}</p>
+      <a className="btn btn-ghost" href="#approvals">
+        Show everything waiting
+      </a>
+    </section>
+  );
+}
+
+/** Who was alerted about this held call (or, in a demo, the alert it would have sent). */
+function AlertLine({ alert }: { alert: AlertInfo | null }) {
+  if (!alert || alert.status === "skipped") return null;
+  if (alert.status === "preview" && alert.preview) {
+    return (
+      <details className="alert-preview">
+        <summary>Alert preview (demo: nothing was sent)</summary>
+        <p className="alert-preview-subject">{alert.preview.subject}</p>
+        <pre>{alert.preview.text}</pre>
+      </details>
+    );
+  }
+  if (alert.status === "off") return <p className="alert-line alert-line-off">Alerts are off, so nobody was notified about this call.</p>;
+  if (alert.status === "nobody") return <p className="alert-line alert-line-off">Nobody was alerted: no approver has email alerts on.</p>;
+  const parts = [
+    alert.emailedTo.length > 0 &&
+      `emailed ${alert.emailedTo.join(", ")}${alert.emailFailed ? ` (${alert.emailFailed} failed)` : ""}`,
+    alert.slack === "sent" && "posted to Slack",
+    alert.slack === "failed" && "Slack failed",
+  ].filter(Boolean);
+  return (
+    <p className={`alert-line ${alert.status === "sent" ? "" : "alert-line-bad"}`}>
+      Alert {parts.join(" · ")}
+    </p>
+  );
+}
+
 function ApprovalCard({
   approval: a,
+  focused,
   session,
   now,
   onDeciding,
   onDecided,
 }: {
+  focused?: boolean;
   approval: Approval;
   session: Session;
   now: number;
@@ -202,9 +268,14 @@ function ApprovalCard({
     }
   }
 
+  const ref = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (focused) ref.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [focused]);
+
   const left = countdown(a.expiresAt, now);
   return (
-    <article className="card approval-card">
+    <article ref={ref} className={`card approval-card ${focused ? "focused" : ""}`}>
       <header className="card-head">
         <div>
           <p className="card-kicker">{toolLabel(a.tool)}</p>
@@ -238,6 +309,7 @@ function ApprovalCard({
       </div>
 
       <AiBrief approval={a} />
+      <AlertLine alert={a.alert} />
 
       <dl className="kv">
         {keyArgs(a.args).map(([k, v]) => (
