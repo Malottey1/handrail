@@ -20,6 +20,8 @@ import { canonicalJson } from "./idempotency.js";
  * invite.revoked     an admin cancelled an unused invite
  * agent_key.created  an admin created an agent API key (its prefix, never the key)
  * agent_key.revoked  an admin revoked an agent key
+ * alert.sent         a held-call alert: who was emailed (names only), Slack, or why nothing was sent
+ * settings.changed   an admin changed a setting (the Slack webhook: set or removed, never the URL)
  */
 export type AuditKind =
   | "chain.started"
@@ -39,7 +41,9 @@ export type AuditKind =
   | "invite.created"
   | "invite.revoked"
   | "agent_key.created"
-  | "agent_key.revoked";
+  | "agent_key.revoked"
+  | "alert.sent"
+  | "settings.changed";
 
 export interface AuditEntry {
   kind: AuditKind;

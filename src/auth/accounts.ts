@@ -24,6 +24,8 @@ export interface User {
   isDemo: boolean;
   createdAt: number;
   disabledAt: number | null;
+  /** Wants an email when a call is held (approvers and admins only get them). On by default. */
+  emailAlerts: boolean;
 }
 
 export interface Invite {
@@ -47,6 +49,7 @@ interface UserRow {
   created_at: number;
   updated_at: number;
   disabled_at: number | null;
+  email_alerts: number;
 }
 
 interface InviteRow {
@@ -136,6 +139,30 @@ export class AccountStore {
       );
       CREATE INDEX IF NOT EXISTS sessions_user ON sessions (user_id);
     `);
+    const columns = new Set((db.prepare(`PRAGMA table_info(users)`).all() as Array<{ name: string }>).map((c) => c.name));
+    if (!columns.has("email_alerts")) db.exec(`ALTER TABLE users ADD COLUMN email_alerts INTEGER NOT NULL DEFAULT 1`);
+  }
+
+  /** Whether this user gets an email when a call is held. The demo account never does. */
+  setEmailAlerts(id: string, on: boolean, now: number): User {
+    const user = this.requireUser(id);
+    if (user.isDemo) throw new AccountError("The demo account never gets emails; alerts are shown as previews instead.", 403);
+    return this.chain.record(now, () => {
+      this.db.prepare(`UPDATE users SET email_alerts = ?, updated_at = ? WHERE id = ?`).run(on ? 1 : 0, now, id);
+      const data = { user: actor(user), by: actor(user), changes: { emailAlerts: on } };
+      return { value: this.get(id)!, entries: [{ kind: "user.updated" as const, ref: `user:${id}`, data }] };
+    });
+  }
+
+  /** Who gets held-call emails: active approvers and admins who left email alerts on. Never the demo account. */
+  alertRecipients(): Array<{ id: string; name: string; email: string }> {
+    return this.db
+      .prepare(
+        `SELECT id, name, email FROM users
+         WHERE role IN ('approver', 'admin') AND disabled_at IS NULL AND is_demo = 0 AND email_alerts = 1
+         ORDER BY created_at`,
+      )
+      .all() as Array<{ id: string; name: string; email: string }>;
   }
 
   // ---- users
@@ -348,6 +375,7 @@ function fromUserRow(row: UserRow): User {
     isDemo: row.is_demo === 1,
     createdAt: row.created_at,
     disabledAt: row.disabled_at,
+    emailAlerts: row.email_alerts !== 0,
   };
 }
 

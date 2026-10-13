@@ -11,7 +11,7 @@ import type { PayPalRest } from "./paypal/rest.js";
 import { evaluate } from "./policy/engine.js";
 import { resolveFacts } from "./policy/facts.js";
 import { formatMoney } from "./policy/money.js";
-import type { CallFacts, Evaluation, Policy } from "./policy/types.js";
+import { holdTtlMs, type CallFacts, type Evaluation, type Policy } from "./policy/types.js";
 import { redactDeep } from "./redact.js";
 
 export const GET_APPROVAL_TOOL: Tool = {
@@ -52,8 +52,8 @@ export interface GateDeps {
 export interface GateOptions {
   /** How long a held call waits inline for a human before returning "pending". */
   approvalWaitMs: number;
-  /** How long a held call stays approvable. */
-  approvalTtlMs: number;
+  /** Overrides how long a held call stays approvable (tests). Normally the policy decides (`approvals.expireAfterHours`, default 24 hours). */
+  approvalTtlMs?: number;
   now?: () => number;
 }
 
@@ -121,7 +121,7 @@ export class Gate {
 
     const approval =
       evaluation.decision === "require_approval"
-        ? this.deps.approvals.create(facts, evaluation, now, this.options.approvalTtlMs, agent)
+        ? this.deps.approvals.create(facts, evaluation, now, this.options.approvalTtlMs ?? holdTtlMs(this.deps.policy()), agent)
         : null;
     const operation =
       op && evaluation.decision !== "block"
@@ -368,7 +368,12 @@ export class Gate {
         return approval.result as CallToolResult;
       case "expired":
         return handrailResult(
-          { status: "expired", ...base, next_step: "Nobody approved this action in time. It was not executed." },
+          {
+            status: "expired",
+            ...base,
+            expired_at: new Date(approval.expiresAt).toISOString(),
+            next_step: "Nobody approved this action in time, so it expired. It was not sent to PayPal. Tell the user; ask again only if they still want it.",
+          },
           true,
         );
     }
@@ -386,11 +391,20 @@ export class Gate {
       : new DecisionError(`Approval ${id} not found`, 404);
   }
 
+  /**
+   * Expired calls are never sent to PayPal. The approval, the held call's row in
+   * the call log and the audit chain all record the expiry, and an agent waiting
+   * on it is told.
+   */
   private expireOverdue(): void {
-    for (const id of this.deps.approvals.expireOverdue(this.now())) {
+    const now = this.now();
+    for (const id of this.deps.approvals.expireOverdue(now)) {
       const operation = this.deps.operations.byApproval(id);
       if (operation) this.finishOperation(operation, "abandoned");
-      log(`approval ${id} expired`);
+      const approval = this.deps.approvals.get(id);
+      const callId = this.deps.callLog.heldCallFor(id);
+      if (approval && callId !== null) this.deps.callLog.finish(callId, this.approvalResult(approval), "expired", 0, now);
+      log(`approval ${id} expired; not sent to PayPal`);
       this.events.emit(id);
     }
   }

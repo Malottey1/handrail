@@ -5,7 +5,7 @@ import type { Outcome } from "./idempotency.js";
 import type { CallFacts, Evaluation, HistoryEntry } from "./policy/types.js";
 
 /** What happened to a call: PayPal's outcome if forwarded, otherwise why not. */
-export type CallOutcome = Outcome | "blocked" | "held" | "duplicate";
+export type CallOutcome = Outcome | "blocked" | "held" | "expired" | "duplicate";
 
 export interface CallRow {
   id: number;
@@ -193,6 +193,14 @@ export class CallLog {
     return this.db
       .prepare(`SELECT * FROM tool_calls WHERE at_ms > ? ORDER BY id DESC LIMIT ?`)
       .all(sinceMs, limit) as unknown as CallRow[];
+  }
+
+  /** The call-log row of a call that's still held for this approval, if any. */
+  heldCallFor(approvalId: string): number | null {
+    const row = this.db.prepare(`SELECT id FROM tool_calls WHERE approval_id = ? AND outcome = 'held' ORDER BY id LIMIT 1`).get(approvalId) as
+      | { id: number }
+      | undefined;
+    return row?.id ?? null;
   }
 
   recent(limit: number): CallRow[] {

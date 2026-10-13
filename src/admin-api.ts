@@ -20,13 +20,16 @@ import { FailureLimiter } from "./auth/rate-limit.js";
 import { DemoError, type DemoService } from "./demo/workspaces.js";
 import { DecisionError } from "./gate.js";
 import { log } from "./log.js";
+import { postToSlack, type EmailSender, type SlackPoster } from "./notify/channels.js";
+import type { AlertRecord } from "./notify/notifier.js";
+import { SettingsError, type SettingsStore } from "./notify/settings.js";
 import { PolicyConflictError } from "./policy/store.js";
 import { redact } from "./redact.js";
 import type { MatchStatus } from "./webhooks.js";
 import type { Workspace } from "./workspace.js";
 
 /** The parts of a workspace the API reads and changes. */
-export type ApiWorkspace = Pick<Workspace, "gate" | "callLog" | "webhooks" | "audit" | "policy" | "agentKeys">;
+export type ApiWorkspace = Pick<Workspace, "gate" | "callLog" | "webhooks" | "audit" | "policy" | "agentKeys" | "alerts" | "notifier">;
 
 export interface AdminDeps extends HttpOptions {
   /** Real data. Demo sessions never see it. */
@@ -38,6 +41,12 @@ export interface AdminDeps extends HttpOptions {
   demoAccess: boolean;
   /** Per-session demo workspaces and the demo agent. Demo sessions are refused without it. */
   demo?: DemoService | null;
+  /** Server-side settings (the Slack webhook for alerts). */
+  settings: SettingsStore;
+  /** The email provider for alerts; null when it isn't configured. */
+  email: EmailSender | null;
+  /** For the "Send test alert" button (faked in tests). */
+  postSlack?: SlackPoster;
   now?: () => number;
 }
 
@@ -76,10 +85,31 @@ const text = (value: unknown, max: number) => (typeof value === "string" && valu
 const redactText = (value: string | null) => (value === null ? null : redact(value));
 
 function publicUser(u: User) {
-  return { id: u.id, email: u.email, name: u.name, role: u.role, isDemo: u.isDemo, createdAt: new Date(u.createdAt).toISOString(), disabled: u.disabledAt !== null };
+  return {
+    id: u.id,
+    email: u.email,
+    name: u.name,
+    role: u.role,
+    isDemo: u.isDemo,
+    createdAt: new Date(u.createdAt).toISOString(),
+    disabled: u.disabledAt !== null,
+    emailAlerts: u.emailAlerts && !u.isDemo,
+  };
 }
 
-function present(a: Approval) {
+function presentAlert(alert: AlertRecord | null) {
+  if (!alert) return null;
+  return {
+    status: alert.status,
+    at: new Date(alert.at).toISOString(),
+    emailedTo: alert.email?.to ?? [],
+    emailFailed: alert.email?.failed ?? 0,
+    slack: alert.slack,
+    preview: alert.preview,
+  };
+}
+
+function present(a: Approval, alert: AlertRecord | null = null) {
   return {
     id: a.id,
     status: a.status,
@@ -102,6 +132,7 @@ function present(a: Approval) {
     explanation: a.explanation,
     explanationStatus: a.explanationStatus,
     explanationModel: a.explanationModel,
+    alert: presentAlert(alert),
   };
 }
 
@@ -116,8 +147,9 @@ function summary(ws: ApiWorkspace) {
     pendingApprovals: ws.gate.listApprovals("pending").length,
     last24h: {
       calls: total(() => true),
-      forwarded: total((c) => c.decision !== "duplicate" && c.outcome !== "held" && c.outcome !== "blocked"),
+      forwarded: total((c) => c.decision !== "duplicate" && c.outcome !== "held" && c.outcome !== "expired" && c.outcome !== "blocked"),
       held: total((c) => c.outcome === "held"),
+      expired: total((c) => c.outcome === "expired"),
       blocked: total((c) => c.decision === "block" || c.outcome === "blocked"),
       duplicates: total((c) => c.decision === "duplicate"),
       failed: total((c) => c.outcome === "failed" || c.outcome === "unknown"),
@@ -126,6 +158,7 @@ function summary(ws: ApiWorkspace) {
       total: webhooks.length,
       flagged: webhooks.filter((w) => w.status === "mismatch" || w.status === "outside_handrail").length,
     },
+    alerts: ws.notifier.channels(),
   };
 }
 
@@ -176,12 +209,13 @@ const actorRef = (principal: Principal) => ({ id: principal.user.id, name: princ
  *           POST /api/auth/signup, /api/auth/login, /api/auth/demo
  * viewer:   GET  /api/summary, /api/approvals[/:id], /api/calls, /api/webhooks,
  *                /api/audit, /api/audit/verify, /api/policy
- *           POST /api/auth/logout; PATCH /api/me; POST /api/me/password
+ *           POST /api/auth/logout; PATCH /api/me, /api/me/alerts; POST /api/me/password
  *           GET/POST /api/demo/run (demo account only: the demo agent)
  * approver: POST /api/approvals/:id/approve | reject
  * admin:    POST /api/policy/compile; PUT /api/policy
  *           GET/PATCH /api/users[/:id]; GET/POST/DELETE /api/invites[/:id]
  *           GET/POST/DELETE /api/agent-keys[/:id]
+ *           GET/PUT /api/settings/alerts; POST /api/settings/alerts/test
  *
  * Every route but the public ones requires a session cookie (plus the CSRF
  * header on changes) or the HANDRAIL_ADMIN_TOKEN bearer token, and its role.
@@ -292,6 +326,15 @@ export function createAdminApi(deps: AdminDeps): (req: IncomingMessage, res: Ser
     return { demo: deps.demo, session: principal.token };
   }
 
+  /** What admins see about alerts. Never the Slack URL or the email provider's key. */
+  function alertSettings() {
+    return {
+      email: { configured: deps.email !== null, provider: deps.email?.description ?? null },
+      slack: deps.settings.slackWebhookInfo(),
+      recipients: deps.accounts.alertRecipients().map((r) => r.name),
+    };
+  }
+
   const routes: Route[] = [
     { method: "POST", path: "auth/logout", role: "viewer", handle: ({ req, res, principal }) => {
       if (principal.kind === "session") deps.accounts.deleteSession(principal.token);
@@ -304,6 +347,52 @@ export function createAdminApi(deps: AdminDeps): (req: IncomingMessage, res: Ser
       const body = await readBody(req);
       const user = deps.accounts.updateProfile(principal.user.id, { name: normalizeName(body.name), email: normalizeEmail(body.email) }, now);
       send(res, 200, { user: publicUser(user) });
+    } },
+
+    { method: "PATCH", path: "me/alerts", role: "viewer", handle: async ({ req, res, principal, now }) => {
+      if (principal.kind !== "session") throw new HttpError(400, "Sign in as a user to change alert settings.");
+      const body = await readBody(req);
+      if (typeof body.emailAlerts !== "boolean") throw new HttpError(400, "emailAlerts must be true or false.");
+      const user = deps.accounts.setEmailAlerts(principal.user.id, body.emailAlerts, now);
+      send(res, 200, { user: publicUser(user) });
+    } },
+
+    { method: "GET", path: "settings/alerts", role: "admin", handle: ({ res }) => send(res, 200, alertSettings()) },
+
+    { method: "PUT", path: "settings/alerts", role: "admin", handle: async ({ req, res, principal, now }) => {
+      const body = await readBody(req);
+      const url = body.slackWebhookUrl;
+      if (url !== null && typeof url !== "string") throw new HttpError(400, "slackWebhookUrl must be a URL, or null to remove it.");
+      deps.settings.setSlackWebhook(url, actorOf(principal, body), now);
+      send(res, 200, alertSettings());
+    } },
+
+    { method: "POST", path: "settings/alerts/test", role: "admin", handle: async ({ res, principal }) => {
+      const result: { email: string; slack: string } = { email: "off", slack: "off" };
+      const text = "This is a test from Handrail. Alerts for held calls will arrive here, with a link to review each one in the dashboard.";
+      if (deps.email && principal.kind === "session") {
+        try {
+          await deps.email.send({
+            to: { email: principal.user.email, name: principal.user.name },
+            subject: "Handrail test alert",
+            text,
+            html: `<p>${text}</p>`,
+          });
+          result.email = `sent to ${principal.user.email}`;
+        } catch (err) {
+          result.email = `failed: ${redact((err as Error).message)}`;
+        }
+      }
+      const webhook = deps.settings.slackWebhook();
+      if (webhook) {
+        try {
+          await (deps.postSlack ?? postToSlack)(webhook, { text: `*Handrail test alert.* ${text}` });
+          result.slack = "sent";
+        } catch (err) {
+          result.slack = `failed: ${redact((err as Error).message)}`;
+        }
+      }
+      send(res, 200, result);
     } },
 
     { method: "POST", path: "me/password", role: "viewer", handle: async ({ req, res, principal, now }) => {
@@ -328,12 +417,12 @@ export function createAdminApi(deps: AdminDeps): (req: IncomingMessage, res: Ser
     { method: "GET", path: "approvals", role: "viewer", handle: ({ res, url, ws }) => {
       const status = url.searchParams.get("status") as ApprovalStatus | null;
       if (status && !STATUSES.has(status)) throw new HttpError(400, `Unknown status ${status}`);
-      send(res, 200, ws.gate.listApprovals(status ?? undefined).map(present));
+      send(res, 200, ws.gate.listApprovals(status ?? undefined).map((a) => present(a, ws.alerts.get(a.id))));
     } },
 
     { method: "GET", path: "approvals/:id", role: "viewer", handle: ({ res, params, ws }) => {
       const approval = ws.gate.getApproval(params[0]!);
-      approval ? send(res, 200, present(approval)) : send(res, 404, { error: "Not found" });
+      approval ? send(res, 200, present(approval, ws.alerts.get(approval.id))) : send(res, 404, { error: "Not found" });
     } },
 
     ...(["approve", "reject"] as const).map(
@@ -342,7 +431,7 @@ export function createAdminApi(deps: AdminDeps): (req: IncomingMessage, res: Ser
         const by = actorOf(principal, body);
         const note = text(body.note, 500);
         const approval = action === "approve" ? await ws.gate.approve(params[0]!, by, note) : ws.gate.reject(params[0]!, by, note);
-        send(res, 200, present(approval));
+        send(res, 200, present(approval, ws.alerts.get(approval.id)));
       } }),
     ),
 
@@ -487,6 +576,7 @@ export function createAdminApi(deps: AdminDeps): (req: IncomingMessage, res: Ser
         send(res, err.status, { error: message }, err.retryAfterSeconds ? { "Retry-After": String(err.retryAfterSeconds) } : {});
       }
       else if (err instanceof CompileError) send(res, 422, { error: message });
+      else if (err instanceof SettingsError) send(res, 400, { error: message });
       else if (err instanceof Error && err.name.endsWith("APIError")) send(res, 502, { error: `AI request failed: ${message}` });
       else if (err instanceof SyntaxError) send(res, 400, { error: "Body must be JSON" });
       else {

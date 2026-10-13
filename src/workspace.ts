@@ -2,12 +2,14 @@ import type { DatabaseSync } from "node:sqlite";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { Explainer } from "./ai/explain.js";
 import type { Llm } from "./ai/llm.js";
-import { ApprovalStore } from "./approvals.js";
+import { ApprovalStore, type Approval } from "./approvals.js";
 import type { AuditChain } from "./audit-chain.js";
 import { CallLog } from "./audit.js";
 import { AgentKeyStore } from "./auth/agent-keys.js";
 import { Gate } from "./gate.js";
 import { OperationStore } from "./idempotency.js";
+import { log } from "./log.js";
+import { AlertStore, type HeldNotifier } from "./notify/notifier.js";
 import type { PayPalDirect } from "./paypal/direct.js";
 import type { PayPalRest } from "./paypal/rest.js";
 import { PolicyStore } from "./policy/store.js";
@@ -29,6 +31,9 @@ export interface Workspace {
   agentKeys: AgentKeyStore;
   policy: PolicyStore;
   gate: Gate;
+  /** Held-call alerts: what was sent (or, in a demo, previewed) for each held call. */
+  alerts: AlertStore;
+  notifier: HeldNotifier;
   close(): void;
 }
 
@@ -44,8 +49,13 @@ export interface WorkspaceOptions {
   /** Where the policy is saved; null keeps it in memory (demo workspaces). */
   policyPath: string | null;
   approvalWaitMs: number;
-  approvalTtlMs: number;
+  /** Overrides the policy's hold expiry (tests). */
+  approvalTtlMs?: number;
   idempotencyWindowMs: number;
+  /** Builds the alert sender: live (email, Slack) for the real workspace, previews for demos. */
+  notifier: (alerts: AlertStore) => HeldNotifier;
+  /** How long an alert waits for the AI brief before going out without it. Default 20 s. */
+  alertWaitMs?: number;
   now?: () => number;
 }
 
@@ -70,6 +80,24 @@ export function openWorkspace(opts: WorkspaceOptions): Workspace {
 
   // AI is advisory only: the gate's decisions never depend on it.
   const explainer = new Explainer(opts.llm, approvals, callLog, () => policy.get(), now);
+  const alerts = new AlertStore(db, audit);
+  const notifier = opts.notifier(alerts);
+  const alertWaitMs = opts.alertWaitMs ?? 20_000;
+
+  // After a call is held: write the AI brief, then alert approvers with its
+  // one-line summary (or without it, if it takes longer than alertWaitMs).
+  // Both run after the decision is recorded and can't change it.
+  const onHeld = (approval: Approval) => {
+    const brief = explainer.explain(approval);
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<void>((resolve) => (timer = setTimeout(resolve, alertWaitMs).unref()));
+    void Promise.race([brief, timeout])
+      .then(() => {
+        clearTimeout(timer);
+        return notifier.held(approvals.get(approval.id) ?? approval);
+      })
+      .catch((err: Error) => log(`Alert for ${approval.id} failed: ${err.message}`));
+  };
   const gate = new Gate(
     {
       upstream: opts.upstream,
@@ -79,7 +107,7 @@ export function openWorkspace(opts: WorkspaceOptions): Workspace {
       approvals,
       operations,
       policy: () => policy.get(),
-      onHeld: (approval) => void explainer.explain(approval),
+      onHeld,
     },
     { approvalWaitMs: opts.approvalWaitMs, approvalTtlMs: opts.approvalTtlMs, now: opts.now },
   );
@@ -93,6 +121,8 @@ export function openWorkspace(opts: WorkspaceOptions): Workspace {
     agentKeys,
     policy,
     gate,
+    alerts,
+    notifier,
     close() {
       gate.close();
       db.close();

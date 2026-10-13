@@ -29,6 +29,9 @@ import { parsePolicy } from "../src/policy/load.js";
 import { PolicyStore } from "../src/policy/store.js";
 import type { CallFacts, Evaluation } from "../src/policy/types.js";
 import { WebhookStore } from "../src/webhooks.js";
+import type { EmailMessage, EmailSender } from "../src/notify/channels.js";
+import { AlertStore, LiveNotifier, PreviewNotifier } from "../src/notify/notifier.js";
+import { SettingsStore } from "../src/notify/settings.js";
 import { registerSecrets } from "../src/redact.js";
 
 const POLICY = parsePolicy({
@@ -42,7 +45,20 @@ const PASSWORD = "correct horse battery";
 const servers: Server[] = [];
 after(() => servers.forEach((s) => s.close()));
 
-async function setup(opts: { demoAccess?: boolean; cookieSecure?: boolean | "auto"; adminToken?: string | undefined } = {}) {
+/** A fake email provider: records what would be sent. */
+class FakeEmail implements EmailSender {
+  readonly description = "Fake (from alerts@handrail.test)";
+  sent: EmailMessage[] = [];
+  failFor = new Set<string>();
+  async send(message: EmailMessage) {
+    if (this.failFor.has(message.to.email)) throw new Error("mailbox unavailable");
+    this.sent.push(message);
+  }
+}
+
+async function setup(
+  opts: { demoAccess?: boolean; cookieSecure?: boolean | "auto"; adminToken?: string | undefined; email?: boolean; ttlMs?: number } = {},
+) {
   const db = new DatabaseSync(":memory:");
   const audit = new AuditChain(db);
   const callLog = new CallLog(db, audit);
@@ -50,7 +66,21 @@ async function setup(opts: { demoAccess?: boolean; cookieSecure?: boolean | "aut
   const accounts = new AccountStore(db, audit);
   const agentKeys = new AgentKeyStore(db, audit);
   const webhooks = new WebhookStore(db, audit);
+  const settings = new SettingsStore(db, audit);
+  const alerts = new AlertStore(db, audit);
   audit.start(Date.now());
+  const email = opts.email ? new FakeEmail() : null;
+  const slackPosts: Array<{ url: string; payload: unknown }> = [];
+  const postSlack = async (url: string, payload: unknown) => void slackPosts.push({ url, payload });
+  const notifier = new LiveNotifier({
+    email,
+    slackWebhook: () => settings.slackWebhook(),
+    postSlack,
+    recipients: () => accounts.alertRecipients(),
+    baseUrl: "https://handrail.test",
+    alerts,
+  });
+  const alertsDone: Array<Promise<void>> = [];
   const policyPath = join(mkdtempSync(join(tmpdir(), "handrail-auth-")), "policy.json");
   writeFileSync(policyPath, JSON.stringify(POLICY));
   const policy = new PolicyStore(policyPath, audit, POLICY);
@@ -75,8 +105,9 @@ async function setup(opts: { demoAccess?: boolean; cookieSecure?: boolean | "aut
       approvals,
       operations: new OperationStore(db, 3_600_000),
       policy: () => policy.get(),
+      onHeld: (approval) => void alertsDone.push(notifier.held(approval)),
     },
-    { approvalWaitMs: 0, approvalTtlMs: 3_600_000 },
+    { approvalWaitMs: 0, approvalTtlMs: opts.ttlMs },
   );
   if (opts.demoAccess) accounts.ensureDemoUser(await hashPassword(demoPassword()), Date.now());
 
@@ -105,8 +136,9 @@ async function setup(opts: { demoAccess?: boolean; cookieSecure?: boolean | "aut
             policy: policy.get(),
             policyPath: null,
             approvalWaitMs: 0,
-            approvalTtlMs: 3_600_000,
             idempotencyWindowMs: 3_600_000,
+            notifier: (demoAlerts) => new PreviewNotifier(demoAlerts, "https://handrail.test"),
+            alertWaitMs: 0,
           });
         },
         // The demo agent reaches the gate the way any agent does: MCP over HTTP with its key.
@@ -121,9 +153,12 @@ async function setup(opts: { demoAccess?: boolean; cookieSecure?: boolean | "aut
   if (demo) after(() => demo.close());
 
   const api = createAdminApi({
-    workspace: { gate, callLog, webhooks, audit, policy, agentKeys },
+    workspace: { gate, callLog, webhooks, audit, policy, agentKeys, alerts, notifier },
     llm: null,
     accounts,
+    settings,
+    email,
+    postSlack,
     demo,
     adminToken: "adminToken" in opts ? opts.adminToken : ADMIN_TOKEN,
     demoAccess: !!opts.demoAccess,
@@ -154,7 +189,28 @@ async function setup(opts: { demoAccess?: boolean; cookieSecure?: boolean | "aut
     return approvals.create(facts, evaluation, Date.now(), 3_600_000);
   };
 
-  return { base, db, audit, accounts, agentKeys, callLog, approvals, webhooks, policy, sent, demo, demoSent, heldRefund, browser: () => new Browser(base) };
+  return {
+    base,
+    db,
+    audit,
+    accounts,
+    agentKeys,
+    callLog,
+    approvals,
+    webhooks,
+    policy,
+    settings,
+    alerts,
+    gate,
+    email,
+    slackPosts,
+    alertsSettled: () => Promise.all(alertsDone),
+    sent,
+    demo,
+    demoSent,
+    heldRefund,
+    browser: () => new Browser(base),
+  };
 }
 
 /** A browser: keeps the session cookie, sends Origin, and echoes the CSRF token. */
@@ -190,8 +246,8 @@ class Browser {
 }
 
 /** An admin, plus an approver and a viewer who joined by invite. */
-async function team() {
-  const ctx = await setup();
+async function team(opts: Parameters<typeof setup>[0] = {}) {
+  const ctx = await setup(opts);
   const admin = ctx.browser();
   assert.equal((await admin.signup("Malcolm Clottey", "malcolm@example.com")).status, 200);
   const join = async (name: string, email: string, role: string) => {
@@ -399,6 +455,91 @@ describe("auth: every endpoint is enforced server-side", () => {
     assert.equal((await admin.req("PATCH", `/api/users/${me.id}`, { role: "viewer" })).status, 400);
     assert.equal((await admin.req("PATCH", `/api/users/${vic.id}`, { disabled: true })).status, 200);
     assert.equal((await viewer.req("GET", "/api/summary")).status, 401, "disabling signs the user out");
+  });
+});
+
+describe("held-call alerts", () => {
+  const SLACK_URL = ["https://hooks.slack.com/services", "T0TEST", "B0TEST", "y".repeat(24)].join("/");
+  const hold = (gate: Gate) =>
+    gate.handle("create_refund", { capture_id: "2GG27306VR5212345", amount: { currency_code: "USD", value: "250.00" } }, { keyId: "k1", name: "Support bot" });
+
+  it("emails approvers and admins who want alerts, never viewers, and shows the alert on the approval", async () => {
+    const { gate, email, approver, viewer, admin, alertsSettled } = await team({ email: true });
+    // The viewer opting in still gets nothing: only approvers and admins can act on an alert.
+    assert.equal((await viewer.req("PATCH", "/api/me/alerts", { emailAlerts: true })).status, 200);
+    assert.equal((await approver.req("PATCH", "/api/me/alerts", { emailAlerts: false })).data.user.emailAlerts, false);
+
+    await hold(gate);
+    await alertsSettled();
+    assert.deepEqual(email!.sent.map((m) => m.to.email), ["malcolm@example.com"]);
+
+    const [card] = (await admin.req("GET", "/api/approvals?status=pending")).data;
+    assert.equal(card.alert.status, "sent");
+    assert.deepEqual(card.alert.emailedTo, ["Malcolm Clottey"]);
+    assert.equal(card.alert.preview, null);
+    const m = email!.sent[0]!;
+    assert.ok(m.text.includes(`https://handrail.test/app#approvals/${card.id}`));
+    for (const leak of [admin.cookie!.split("=")[1]!, admin.csrf!]) assert.ok(!JSON.stringify(m).includes(leak), "no session or CSRF token");
+  });
+
+  it("is off without an email provider or Slack webhook, and the dashboard says so", async () => {
+    const { gate, admin, alertsSettled } = await team();
+    assert.deepEqual((await admin.req("GET", "/api/summary")).data.alerts, { mode: "live", email: false, slack: false });
+    await hold(gate);
+    await alertsSettled();
+    const [card] = (await admin.req("GET", "/api/approvals?status=pending")).data;
+    assert.equal(card.alert.status, "off");
+  });
+
+  it("only admins set the Slack webhook; it's never returned or audited in full, and it's used for alerts", async () => {
+    const { admin, approver, gate, slackPosts, alertsSettled, db } = await team();
+    assert.equal((await approver.req("GET", "/api/settings/alerts")).status, 403);
+    assert.equal((await approver.req("PUT", "/api/settings/alerts", { slackWebhookUrl: SLACK_URL })).status, 403);
+
+    const bad = await admin.req("PUT", "/api/settings/alerts", { slackWebhookUrl: "https://example.com/hook" });
+    assert.equal(bad.status, 400);
+    assert.match(bad.data.error, /Slack incoming webhook/);
+
+    const set = await admin.req("PUT", "/api/settings/alerts", { slackWebhookUrl: SLACK_URL });
+    assert.equal(set.status, 200);
+    assert.equal(set.data.slack.masked, "hooks.slack.com/…/yyyy");
+    const shown = JSON.stringify([set.data, (await admin.req("GET", "/api/settings/alerts")).data, (await admin.req("GET", "/api/audit?limit=500")).data]);
+    assert.ok(!shown.includes(SLACK_URL), "never shown in full");
+    assert.ok(!JSON.stringify(db.prepare("SELECT * FROM audit_chain").all()).includes(SLACK_URL), "never in the audit log");
+    assert.deepEqual((await admin.req("GET", "/api/summary")).data.alerts, { mode: "live", email: false, slack: true });
+
+    await hold(gate);
+    await alertsSettled();
+    assert.equal(slackPosts.length, 1);
+    assert.equal(slackPosts[0]!.url, SLACK_URL);
+
+    const test = await admin.req("POST", "/api/settings/alerts/test");
+    assert.deepEqual(test.data, { email: "off", slack: "sent" });
+
+    assert.equal((await admin.req("PUT", "/api/settings/alerts", { slackWebhookUrl: null })).data.slack.set, false);
+  });
+
+  it("the demo account can't turn on emails; its held calls show an in-app preview and send nothing", async () => {
+    const ctx = await setup({ demoAccess: true, email: true });
+    const judge = ctx.browser();
+    const signedIn = await judge.req("POST", "/api/auth/demo");
+    assert.equal(signedIn.data.user.emailAlerts, false);
+    assert.equal((await judge.req("PATCH", "/api/me/alerts", { emailAlerts: true })).status, 403);
+    assert.deepEqual((await judge.req("GET", "/api/summary")).data.alerts, { mode: "preview", email: false, slack: false });
+
+    // Even with Slack set on the real workspace, a demo workspace's held call is only previewed.
+    ctx.settings.setSlackWebhook(SLACK_URL, { id: "u", name: "Admin" }, Date.now());
+    const ws = ctx.demo!.workspace(judge.cookie!.split("=")[1]!);
+    await hold(ws.gate);
+    let card;
+    for (let i = 0; i < 100 && !card?.alert; i++) {
+      [card] = (await judge.req("GET", "/api/approvals?status=pending")).data;
+      if (!card?.alert) await new Promise((r) => setTimeout(r, 10));
+    }
+    assert.equal(card.alert.status, "preview");
+    assert.equal(card.alert.preview.subject, "Approval needed: Refund of 250.00 USD");
+    assert.equal(ctx.email!.sent.length, 0);
+    assert.equal(ctx.slackPosts.length, 0);
   });
 });
 

@@ -76,8 +76,17 @@ export const ruleSchema = z.discriminatedUnion("type", [
   payeeAllowlistRule,
 ]);
 
+/** Held calls that nobody decides in time expire: never sent to PayPal, and the agent is told. */
+export const DEFAULT_EXPIRE_AFTER_HOURS = 24;
+
 export const policySchema = z.object({
   version: z.literal(1),
+  /** How long a held call waits for a human. Optional; defaults to 24 hours. */
+  approvals: z
+    .object({
+      expireAfterHours: z.number().positive().max(720, "held calls can wait at most 720 hours (30 days)"),
+    })
+    .optional(),
   /** Decision when no rule fires, by tool class. */
   defaults: z.object({
     read: decision,
@@ -90,6 +99,11 @@ export const policySchema = z.object({
 
 export type Rule = z.infer<typeof ruleSchema>;
 export type Policy = z.infer<typeof policySchema>;
+
+/** How long a held call stays approvable under this policy, in milliseconds. */
+export function holdTtlMs(policy: Policy): number {
+  return (policy.approvals?.expireAfterHours ?? DEFAULT_EXPIRE_AFTER_HOURS) * 60 * 60 * 1000;
+}
 
 export type ToolClass = "read" | "write" | "money" | "unknown";
 

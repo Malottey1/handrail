@@ -24,6 +24,9 @@ import { createProxyServer, SERVER_INFO } from "./proxy.js";
 import { serveDashboard } from "./static.js";
 import { handleWebhook } from "./webhook-endpoint.js";
 import { openWorkspace } from "./workspace.js";
+import { BrevoEmail, postToSlack } from "./notify/channels.js";
+import { LiveNotifier, PreviewNotifier } from "./notify/notifier.js";
+import { SettingsStore } from "./notify/settings.js";
 
 /** The built React dashboard (npm run build:web). */
 const DASHBOARD_DIR = process.env.HANDRAIL_DASHBOARD_DIR?.trim() || "web/dist";
@@ -54,7 +57,6 @@ async function main(): Promise<void> {
     direct,
     llm,
     approvalWaitMs: config.approvalWaitMs,
-    approvalTtlMs: config.approvalTtlMs,
     idempotencyWindowMs: config.idempotencyWindowMs,
   };
 
@@ -62,7 +64,32 @@ async function main(): Promise<void> {
   db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
   const audit = new AuditChain(db);
   const accounts = new AccountStore(db, audit);
-  const workspace = openWorkspace({ ...shared, db, audit, policy, policyPath: config.policyPath });
+  const settings = new SettingsStore(db, audit);
+
+  // Held-call alerts: email (Brevo) to approvers and admins who want them, and
+  // Slack if an admin set a webhook. With neither, they're off: nothing is sent.
+  const email = config.email ? new BrevoEmail(config.email.brevoApiKey, config.email.from) : null;
+  const workspace = openWorkspace({
+    ...shared,
+    db,
+    audit,
+    policy,
+    policyPath: config.policyPath,
+    notifier: (alerts) =>
+      new LiveNotifier({
+        email,
+        slackWebhook: () => settings.slackWebhook(),
+        postSlack: postToSlack,
+        recipients: () => accounts.alertRecipients(),
+        baseUrl: config.publicUrl,
+        alerts,
+      }),
+  });
+  log(
+    email || settings.slackWebhook()
+      ? `Held-call alerts on (${[email && "email", settings.slackWebhook() && "Slack"].filter(Boolean).join(" and ")}); links point to ${config.publicUrl}`
+      : "Held-call alerts off: set BREVO_API_KEY and HANDRAIL_ALERT_FROM, or add a Slack webhook in the dashboard",
+  );
   const { gate, callLog, webhooks, agentKeys } = workspace;
 
   // The demo agent calls Handrail's own /mcp with its key, like any outside agent.
@@ -74,7 +101,15 @@ async function main(): Promise<void> {
         // Each demo session starts from the policy in force, in memory, with nothing else.
         open: () => {
           const demoDb = new DatabaseSync(":memory:");
-          return openWorkspace({ ...shared, db: demoDb, audit: new AuditChain(demoDb), policy: workspace.policy.get(), policyPath: null });
+          // Demo workspaces never send email or Slack messages: alerts are previews in the dashboard.
+          return openWorkspace({
+            ...shared,
+            db: demoDb,
+            audit: new AuditChain(demoDb),
+            policy: workspace.policy.get(),
+            policyPath: null,
+            notifier: (alerts) => new PreviewNotifier(alerts, config.publicUrl),
+          });
         },
         connect: async (agentKey) => {
           if (stdio) throw new Error("The demo agent needs Handrail running over HTTP (npm run dev), not stdio.");
@@ -94,6 +129,8 @@ async function main(): Promise<void> {
   const adminApi = createAdminApi({
     workspace,
     accounts,
+    settings,
+    email,
     llm,
     demo,
     adminToken: config.adminToken,
