@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { checkAdminToken } from "./auth/http.js";
+import { registerClientCredentials, registerSecrets } from "./redact.js";
 
 export interface Config {
   paypalClientId: string;
@@ -78,10 +79,17 @@ export function loadConfig(): Config {
   }
 
   const adminToken = checkAdminToken(token("HANDRAIL_ADMIN_TOKEN"), process.env);
+  const paypalClientId = required("PAYPAL_CLIENT_ID");
+  const paypalClientSecret = required("PAYPAL_CLIENT_SECRET");
+  const agentToken = token("HANDRAIL_AGENT_TOKEN");
+  const anthropicApiKey = process.env.ANTHROPIC_API_KEY?.trim() || undefined;
+  // From here on, these values are redacted wherever they'd appear (src/redact.ts).
+  registerClientCredentials(paypalClientId, paypalClientSecret);
+  registerSecrets(adminToken, agentToken, anthropicApiKey);
 
   return {
-    paypalClientId: required("PAYPAL_CLIENT_ID"),
-    paypalClientSecret: required("PAYPAL_CLIENT_SECRET"),
+    paypalClientId,
+    paypalClientSecret,
     paypalBaseUrl,
     paypalMcpUrl,
     port: Number(process.env.PORT) || 8787,
@@ -91,10 +99,10 @@ export function loadConfig(): Config {
     approvalWaitMs: positiveNumber("HANDRAIL_APPROVAL_WAIT_SECONDS", 20) * 1000,
     approvalTtlMs: positiveNumber("HANDRAIL_APPROVAL_TTL_MINUTES", 60) * 60 * 1000,
     idempotencyWindowMs: positiveNumber("HANDRAIL_IDEMPOTENCY_WINDOW_MINUTES", 60) * 60 * 1000,
-    agentToken: token("HANDRAIL_AGENT_TOKEN"),
+    agentToken,
     paypalWebhookId: process.env.PAYPAL_WEBHOOK_ID?.trim() || undefined,
     allowUnverifiedWebhooks: process.env.HANDRAIL_WEBHOOK_ALLOW_UNVERIFIED?.trim() === "true",
-    anthropicApiKey: process.env.ANTHROPIC_API_KEY?.trim() || undefined,
+    anthropicApiKey,
     aiModel: process.env.HANDRAIL_AI_MODEL?.trim() || "claude-opus-5-5",
     demoAccess: process.env.HANDRAIL_DEMO_ACCESS?.trim() === "true",
     trustProxy: process.env.HANDRAIL_TRUST_PROXY?.trim() === "true",

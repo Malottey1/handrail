@@ -29,6 +29,7 @@ import { parsePolicy } from "../src/policy/load.js";
 import { PolicyStore } from "../src/policy/store.js";
 import type { CallFacts, Evaluation } from "../src/policy/types.js";
 import { WebhookStore } from "../src/webhooks.js";
+import { registerSecrets } from "../src/redact.js";
 
 const POLICY = parsePolicy({
   version: 1,
@@ -398,6 +399,39 @@ describe("auth: every endpoint is enforced server-side", () => {
     assert.equal((await admin.req("PATCH", `/api/users/${me.id}`, { role: "viewer" })).status, 400);
     assert.equal((await admin.req("PATCH", `/api/users/${vic.id}`, { disabled: true })).status, 200);
     assert.equal((await viewer.req("GET", "/api/summary")).status, 401, "disabling signs the user out");
+  });
+});
+
+describe("admin API errors", () => {
+  it("an unexpected error gets a generic message and an id: no internal detail, stack trace or secret", async () => {
+    const secret = "cfg" + "Z5".repeat(20);
+    registerSecrets(secret);
+    const { base, callLog } = await setup();
+    callLog.recent = () => {
+      throw new Error(`SQLITE_CORRUPT in /srv/handrail/src/audit.ts with ${secret}`);
+    };
+    const browser = new Browser(base);
+    await browser.signup("Ada", "ada@example.com");
+    const res = await browser.req("GET", "/api/calls");
+    assert.equal(res.status, 500);
+    const text = JSON.stringify(res.data);
+    assert.match(String(res.data?.errorId), /^[0-9a-f]{12}$/);
+    for (const leak of ["SQLITE", "/srv/", secret, "    at "]) assert.ok(!text.includes(leak), `leaked ${leak.slice(0, 8)}`);
+  });
+
+  it("expected errors still say what went wrong, redacted", async () => {
+    const { base } = await setup();
+    const browser = new Browser(base);
+    await browser.signup("Ada", "ada@example.com");
+    // An invalid policy names the unknown tool in its error; here the "tool" is a pasted key.
+    const current = await browser.req("GET", "/api/policy");
+    const key = "hr_" + "agent_" + "k".repeat(30);
+    const policy = { ...current.data.policy, rules: [{ id: "r1", type: "tool", tools: [key], decision: "require_approval" }] };
+    const res = await browser.req("PUT", "/api/policy", { policy, baseHash: current.data.hash });
+    assert.equal(res.status, 400);
+    assert.match(res.data.error, /unknown tool/);
+    assert.ok(typeof res.data?.error === "string" && res.data.error.length > 0, "the reason is still given");
+    assert.ok(!JSON.stringify(res.data).includes("k".repeat(30)));
   });
 });
 

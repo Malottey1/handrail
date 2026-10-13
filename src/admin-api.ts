@@ -19,7 +19,9 @@ import { hashPassword, passwordProblem, verifyPassword } from "./auth/passwords.
 import { FailureLimiter } from "./auth/rate-limit.js";
 import { DemoError, type DemoService } from "./demo/workspaces.js";
 import { DecisionError } from "./gate.js";
+import { log } from "./log.js";
 import { PolicyConflictError } from "./policy/store.js";
+import { redact } from "./redact.js";
 import type { MatchStatus } from "./webhooks.js";
 import type { Workspace } from "./workspace.js";
 
@@ -71,6 +73,7 @@ async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> 
 }
 
 const text = (value: unknown, max: number) => (typeof value === "string" && value.trim() ? value.trim().slice(0, max) : null);
+const redactText = (value: string | null) => (value === null ? null : redact(value));
 
 function publicUser(u: User) {
   return { id: u.id, email: u.email, name: u.name, role: u.role, isDemo: u.isDemo, createdAt: new Date(u.createdAt).toISOString(), disabled: u.disabledAt !== null };
@@ -379,7 +382,7 @@ export function createAdminApi(deps: AdminDeps): (req: IncomingMessage, res: Ser
         ws.policy.replace(body.policy, {
           by: by.name,
           byId: by.id,
-          source: text(body.source, 1000),
+          source: redactText(text(body.source, 1000)),
           baseHash: String(body.baseHash ?? ""),
           now: clock(),
         });
@@ -474,16 +477,23 @@ export function createAdminApi(deps: AdminDeps): (req: IncomingMessage, res: Ser
       }
       throw new HttpError(404, "Not found");
     } catch (err) {
-      if (err instanceof HttpError) send(res, err.status, { error: err.message }, err.headers);
-      else if (err instanceof AccountError) send(res, err.status, { error: err.message });
-      else if (err instanceof DecisionError) send(res, err.status, { error: err.message });
+      // Every message is redacted. Expected errors say what went wrong; anything
+      // else gets a generic message and an id, and the detail stays in the server log.
+      const message = redact(err instanceof Error ? err.message : String(err));
+      if (err instanceof HttpError) send(res, err.status, { error: message }, err.headers);
+      else if (err instanceof AccountError) send(res, err.status, { error: message });
+      else if (err instanceof DecisionError) send(res, err.status, { error: message });
       else if (err instanceof DemoError) {
-        send(res, err.status, { error: err.message }, err.retryAfterSeconds ? { "Retry-After": String(err.retryAfterSeconds) } : {});
+        send(res, err.status, { error: message }, err.retryAfterSeconds ? { "Retry-After": String(err.retryAfterSeconds) } : {});
       }
-      else if (err instanceof CompileError) send(res, 422, { error: err.message });
-      else if (err instanceof Error && err.name.endsWith("APIError")) send(res, 502, { error: `AI request failed: ${err.message}` });
+      else if (err instanceof CompileError) send(res, 422, { error: message });
+      else if (err instanceof Error && err.name.endsWith("APIError")) send(res, 502, { error: `AI request failed: ${message}` });
       else if (err instanceof SyntaxError) send(res, 400, { error: "Body must be JSON" });
-      else send(res, 500, { error: (err as Error).message });
+      else {
+        const errorId = randomBytes(6).toString("hex");
+        log(`API error ${errorId} on ${req.method} ${ctx.parts.join("/")}: ${message}`);
+        send(res, 500, { error: `Something went wrong on Handrail's side (error ${errorId}).`, errorId });
+      }
     }
     return true;
   };

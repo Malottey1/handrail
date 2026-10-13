@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { redact } from "../redact.js";
 
 /**
  * The one way Handrail talks to a language model: ask for JSON matching a
@@ -59,13 +60,13 @@ export class AnthropicLlm implements Llm {
     this.client = new Anthropic({ apiKey, timeout: TIMEOUT_MS, maxRetries: 2 });
   }
 
-  /** Structured outputs: the reply's text is JSON matching the schema. */
+  /** Structured outputs: the reply's text is JSON matching the schema. Prompts are redacted before they're sent. */
   async json(request: Parameters<Llm["json"]>[0]): Promise<unknown> {
     const message = await this.client.messages.create({
       model: this.model,
       max_tokens: request.maxTokens ?? 2000,
-      system: `${request.system}\n\nAnswer with the ${request.name} JSON object: ${request.description}`,
-      messages: [{ role: "user", content: request.user }],
+      system: redact(`${request.system}\n\nAnswer with the ${request.name} JSON object: ${request.description}`),
+      messages: [{ role: "user", content: redact(request.user) }],
       output_config: { format: { type: "json_schema", schema: structuredSchema(request.schema) as Record<string, unknown> } },
     });
     const text = message.content

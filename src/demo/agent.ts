@@ -4,6 +4,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { CallLog, CallRow } from "../audit.js";
 import { formatHundredths, toHundredths } from "../policy/money.js";
 import type { Policy } from "../policy/types.js";
+import { redact } from "../redact.js";
 import type { DemoSale } from "./sale.js";
 
 export type StepStatus = "waiting" | "running" | "done" | "unexpected" | "failed";
@@ -184,13 +185,15 @@ export async function runDemoAgent(run: DemoRun, deps: DemoAgentDeps): Promise<v
 
     run.status = "done";
   } catch (err) {
+    // Shown in the dashboard, so redacted like any other error message.
+    const message = redact((err as Error).message);
     const running = run.steps.find((s) => s.status === "running");
     if (running) {
       running.status = "failed";
-      running.outcome = (err as Error).message;
+      running.outcome = message;
     }
     run.status = "failed";
-    run.error = (err as Error).message;
+    run.error = message;
   } finally {
     run.finishedAt = now();
     await client?.close().catch(() => {});

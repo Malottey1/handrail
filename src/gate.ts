@@ -12,6 +12,7 @@ import { evaluate } from "./policy/engine.js";
 import { resolveFacts } from "./policy/facts.js";
 import { formatMoney } from "./policy/money.js";
 import type { CallFacts, Evaluation, Policy } from "./policy/types.js";
+import { redactDeep } from "./redact.js";
 
 export const GET_APPROVAL_TOOL: Tool = {
   name: "handrail_get_approval",
@@ -93,6 +94,8 @@ export class Gate {
   /** `agent` is who made the call (an agent key, or the local stdio agent); it's recorded, never trusted for decisions. */
   async handle(tool: string, rawArgs: Record<string, unknown>, agent: AgentIdentity | null = null): Promise<CallToolResult> {
     if (tool === GET_APPROVAL_TOOL.name) return this.getApprovalTool(rawArgs);
+    // Credentials in an agent's arguments are never stored, shown to approvers or the AI, or sent on to PayPal.
+    rawArgs = redactDeep(rawArgs);
 
     const op = operationKey(tool, rawArgs);
     const args = op?.args ?? rawArgs;
@@ -273,6 +276,8 @@ export class Gate {
       threw = true;
       result = unknownOutcomeResult(tool, err as Error, direct);
     }
+    // What's recorded and returned to the agent never carries a credential.
+    result = redactDeep(result);
     const durationMs = performance.now() - started;
     const outcome = classifyOutcome(result, threw);
 

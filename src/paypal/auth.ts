@@ -1,4 +1,5 @@
 import { log } from "../log.js";
+import { registerSecrets } from "../redact.js";
 
 /** Refresh this long before PayPal says the token expires. */
 const REFRESH_MARGIN_MS = 5 * 60 * 1000;
@@ -55,6 +56,7 @@ export class PayPalTokenManager {
 
     const data = (await res.json()) as TokenResponse;
     this.token = data.access_token;
+    registerSecrets(this.token);
     this.expiresAt = Date.now() + data.expires_in * 1000;
     log(`Obtained PayPal access token (expires in ${Math.round(data.expires_in / 60)} min)`);
     return this.token;

@@ -1,4 +1,4 @@
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { DatabaseSync } from "node:sqlite";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -10,6 +10,7 @@ import { STDIO_AGENT } from "./auth/agent-keys.js";
 import { hashPassword } from "./auth/passwords.js";
 import { loadConfig } from "./config.js";
 import { createDemoSale } from "./demo/sale.js";
+import { withErrorBoundary } from "./error-boundary.js";
 import { DemoService } from "./demo/workspaces.js";
 import { log } from "./log.js";
 import { PayPalTokenManager } from "./paypal/auth.js";
@@ -107,7 +108,7 @@ async function main(): Promise<void> {
   // The HTTP server always runs. It carries the admin API (approvals), the
   // PayPal webhook endpoint, and the agent-facing /mcp endpoint when not in
   // stdio mode. Binds to localhost unless HANDRAIL_HOST says otherwise.
-  const http = createServer(async (req, res) => {
+  const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     const path = new URL(req.url ?? "/", "http://localhost").pathname;
     if (path === "/health") {
       res.writeHead(200, { "Content-Type": "application/json" }).end('{"ok":true}');
@@ -135,7 +136,8 @@ async function main(): Promise<void> {
       return;
     }
     await handleMcp(req, res, { upstream, gate, agentKeys, agentToken: config.agentToken, demo });
-  });
+  };
+  const http = createServer(withErrorBoundary(handleRequest));
 
   http.on("error", (err: NodeJS.ErrnoException) => {
     if (stdio && err.code === "EADDRINUSE") {
