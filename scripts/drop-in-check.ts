@@ -1,6 +1,6 @@
 // Compares what an agent sees from PayPal's MCP server with what it sees from
-// Handrail (server info, capabilities, resources, every tool's name,
-// description and input schema). Lists only; never calls a tool.
+// Handrail (capabilities, resources, every tool's name, description and input
+// schema; Handrail keeps its own server name). Lists only; never calls a tool.
 // Run with: npm run check:drop-in [-- --update]  (--update refreshes the test fixture)
 import { writeFileSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -33,6 +33,7 @@ if (process.argv.includes("--update")) {
 
 const problems = compareServers(theirs, ours);
 console.log(`${theirs.serverInfo?.name} ${theirs.serverInfo?.version}: ${theirs.tools.length} tools, ${theirs.resources.length} resources`);
+console.log(`Handrail identifies as ${ours.serverInfo?.name} ${ours.serverInfo?.version}`);
 console.log(`Handrail adds only: ${HANDRAIL_ADDITIONS.tools.join(", ")} and an optional ${HANDRAIL_ADDITIONS.argument} on non-read tools`);
 if (problems.length) {
   console.log(`\n${problems.length} difference(s):`);

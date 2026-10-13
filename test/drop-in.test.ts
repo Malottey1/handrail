@@ -11,7 +11,7 @@ import {
   ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import type { Gate } from "../src/gate.js";
-import { createProxyServer } from "../src/proxy.js";
+import { createProxyServer, SERVER_INFO } from "../src/proxy.js";
 import { compareServers, snapshotServer, type ServerSnapshot } from "../src/tool-parity.js";
 
 /** PayPal's sandbox MCP server as an agent sees it. Refresh with `npm run check:drop-in -- --update`. */
@@ -57,7 +57,14 @@ describe("drop-in compatibility with PayPal's MCP server", () => {
     }
   });
 
-  it("presents the same server info, capabilities, resources, tool names, descriptions and schemas", async () => {
+  it("identifies as Handrail, never as PayPal", async () => {
+    const { viaHandrail } = await bothSides();
+    assert.deepEqual(viaHandrail.serverInfo, SERVER_INFO);
+    assert.equal(SERVER_INFO.name, "handrail");
+    assert.equal(SERVER_INFO.version, JSON.parse(readFileSync("package.json", "utf8")).version);
+  });
+
+  it("presents the same capabilities, resources, tool names, descriptions and schemas", async () => {
     const { direct, viaHandrail } = await bothSides();
     assert.deepEqual(compareServers(direct, viaHandrail), []);
     // Also against the raw fixture, so a change to the fake can't hide a gap.
@@ -96,7 +103,8 @@ describe("drop-in compatibility with PayPal's MCP server", () => {
     assert.match(edit((s) => (s.tools = s.tools.filter((t) => t.name !== "pay_order"))).join(), /pay_order: missing/);
     assert.match(edit((s) => s.tools.push({ ...tool(s, "create_refund"), name: "bonus_tool" })).join(), /bonus_tool: extra tool/);
     assert.match(edit((s) => tool(s, "create_refund").inputSchema.required!.push("idempotency_key")).join(), /must stay optional/);
-    assert.match(edit((s) => (s.serverInfo = { name: "handrail", version: "0.1.0" })).join(), /server info/);
+    assert.deepEqual(edit((s) => (s.serverInfo = { name: "handrail", version: "9.9.9" })), []);
+    assert.match(edit((s) => (s.serverInfo = PAYPAL.serverInfo)).join(), /claims to be the upstream server/);
     assert.match(edit((s) => (s.capabilities = { tools: {} })).join(), /capabilities/);
     assert.match(edit((s) => s.tools.reverse()).join(), /different order/);
   });

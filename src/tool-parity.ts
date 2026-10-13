@@ -5,9 +5,9 @@ import { GET_APPROVAL_TOOL } from "./gate.js";
 import { classifyTool } from "./policy/classify.js";
 
 /**
- * What an MCP client can see of a server before calling anything. Handrail
- * must look the same as PayPal's server here, so an Agent Toolkit agent can
- * be pointed at it with no code changes.
+ * What an MCP client can see of a server before calling anything. Apart from
+ * its own name and version, Handrail must look the same as PayPal's server
+ * here, so an Agent Toolkit agent can be pointed at it with no code changes.
  */
 export interface ServerSnapshot {
   serverInfo: Implementation | null;
@@ -74,11 +74,15 @@ function withoutAddition(tool: Tool): Tool {
   return { ...tool, inputSchema: { ...tool.inputSchema, properties } };
 }
 
-/** Every way `ours` differs from `upstream`, beyond HANDRAIL_ADDITIONS. Empty means drop-in. */
+/**
+ * Every way `ours` differs from `upstream`, beyond HANDRAIL_ADDITIONS and its
+ * own server name and version. Empty means drop-in.
+ */
 export function compareServers(upstream: ServerSnapshot, ours: ServerSnapshot): string[] {
   const problems: string[] = [];
-  if (!same(upstream.serverInfo, ours.serverInfo)) {
-    problems.push(`server info: upstream ${canonicalJson(upstream.serverInfo)}, Handrail ${canonicalJson(ours.serverInfo)}`);
+  // Handrail names itself; it must never present PayPal's identity.
+  if (ours.serverInfo?.name === upstream.serverInfo?.name) {
+    problems.push(`server info: Handrail claims to be the upstream server (${canonicalJson(ours.serverInfo)})`);
   }
   if (!same(upstream.capabilities, ours.capabilities)) {
     problems.push(`capabilities: upstream ${canonicalJson(upstream.capabilities)}, Handrail ${canonicalJson(ours.capabilities)}`);

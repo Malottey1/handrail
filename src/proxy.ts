@@ -18,16 +18,19 @@ const IDEMPOTENCY_PROPERTY = {
     "Without a key, identical calls within an hour are treated as retries of one operation.",
 };
 
+/** How Handrail identifies itself to agents. It never claims to be PayPal. Keep in step with package.json. */
+export const SERVER_INFO = { name: "handrail", version: "0.1.0" };
+
 /**
- * Builds the agent-facing MCP server. It presents itself as the upstream
- * server (same name, capabilities, instructions, resources and tools), so an
- * existing Agent Toolkit agent works unchanged. The only additions are an
+ * Builds the agent-facing MCP server. It offers the upstream server's
+ * capabilities, instructions, resources and tools, so an existing Agent
+ * Toolkit agent works with no code changes. The only additions are an
  * optional idempotency_key on every non-read tool and handrail_get_approval
  * (see src/tool-parity.ts). Every tool call goes through the gate.
  */
 export function createProxyServer(upstream: Client, gate: Gate): Server {
   const upstreamCaps = upstream.getServerCapabilities() ?? {};
-  const server = new Server(upstream.getServerVersion() ?? { name: "handrail", version: "0.1.0" }, {
+  const server = new Server(SERVER_INFO, {
     capabilities: {
       tools: upstreamCaps.tools ?? {},
       ...(upstreamCaps.resources ? { resources: upstreamCaps.resources } : {}),
