@@ -118,10 +118,14 @@ async function session(call: (name: string, args: Record<string, unknown>) => Pr
   return results;
 }
 
+/** Everything the two paths recorded. Measured durations are wall-clock time, so they're left out. */
 const dump = (db: DatabaseSync) => ({
-  calls: db.prepare(`SELECT * FROM tool_calls ORDER BY id`).all(),
+  calls: (db.prepare(`SELECT * FROM tool_calls ORDER BY id`).all() as Array<Record<string, unknown>>).map((r) => ({ ...r, duration_ms: null })),
   approvals: db.prepare(`SELECT * FROM approvals ORDER BY created_at, tool`).all(),
-  audit: db.prepare(`SELECT seq, at, kind, ref, data_json FROM audit_chain ORDER BY seq`).all(),
+  audit: (db.prepare(`SELECT seq, at, kind, ref, data_json FROM audit_chain ORDER BY seq`).all() as Array<{ data_json: string }>).map((r) => ({
+    ...r,
+    data_json: r.data_json.replace(/"durationMs":\d+/g, '"durationMs":0'),
+  })),
 });
 
 describe("REST tool-call API vs MCP", () => {
