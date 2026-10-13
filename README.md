@@ -81,6 +81,8 @@ Open http://127.0.0.1:8787 and click **Set up Handrail**: the first account beco
 - Sessions live in httpOnly, SameSite=Strict cookies. They are also Secure, except on plain-HTTP localhost.
 - Every change made with a session needs a per-session CSRF token. Cross-site requests are refused.
 - Failed logins are rate-limited.
+- Secrets are redacted everywhere they could leave the server: logs, error messages, results returned to agents, the audit log and prompts sent to the AI. That covers the configured secrets by value, plus anything shaped like a credential (Authorization headers, API keys, PayPal access tokens, agent keys). An unexpected error gets a generic message with an error ID; the details stay in the server log, and no stack trace reaches a client.
+- A pre-commit hook (enabled by `npm install`) and a GitHub Actions check (gitleaks over the full history) block commits that contain secrets. Run `npm run check:secrets` to scan every tracked file.
 - `HANDRAIL_ADMIN_TOKEN` is for local scripts only. When it's unset, Handrail refuses every bearer token on the API. Never set it on Render or any public deploy; Handrail won't start on Render if it is set. Anything done with it is recorded under the name "Admin script" (plus the script's own label, if it gives one), never anonymously.
 
 | Variable | Needed for |
@@ -118,6 +120,7 @@ npm run demo:approval                 # allow, hold and approve, block, hold and
 npm run sandbox:capture               # a real sandbox payment, captured through Handrail
 npm run demo:retry-storm -- --capture <id> --amount 5.00 --count 10   # 10 identical refunds, PayPal gets one
 npm run audit:verify                  # recompute the hash chain; exits 1 if anything was altered
+npm run check:secrets                 # scan every tracked file for secrets
 npm test                              # policy engine, gate, idempotency, audit chain, webhooks, AI validation
 ```
 

@@ -59,6 +59,12 @@ TypeScript, Node.js, the official MCP TypeScript SDK (Handrail is an MCP server 
   - Approvals record `decided_by` (name) and `decided_by_id`; policy changes record `byId`. User, invite and agent-key changes are audit-chain entries (never password hashes or key material).
   - Agent keys (`hr_agent_…`): shown once, stored as SHA-256, revocable. `/mcp` (`src/mcp-endpoint.ts`) refuses calls without a valid key (or `HANDRAIL_AGENT_TOKEN`); every call, duplicate and approval records the agent (`agent_key_id`, `agent_name`), and stdio calls are recorded as "Local agent (stdio)".
   - Demo: `HANDRAIL_DEMO_ACCESS=true` seeds "Demo Approver" (approver, random unusable password) and enables `POST /api/auth/demo`. It can't sign in with a password, change its profile or password, or become admin.
+- Secrets (`src/redact.ts`, `src/error-boundary.ts`, `test/redact.test.ts`):
+  - `loadConfig` registers the PayPal client id/secret (and their Basic encoding), admin and agent tokens and the Anthropic key; the token manager registers each PayPal access token. `redact()` removes registered values plus credential shapes (Bearer/Basic, `sk-…`, `A21AA…`, `hr_agent_…`, `access_token=`/`password:` pairs).
+  - Applied in `log()`, at the gate's entry (agent arguments, so nothing secret is stored, audited, shown to approvers or the AI, or forwarded) and on every PayPal result, in `AnthropicLlm.json` (prompts), in admin API error messages, and in demo run errors.
+  - Unexpected errors: the admin API and the top-level HTTP handler return a generic 500 with an `errorId`; the redacted detail is logged. No stack traces reach clients.
+  - Prevention: `scripts/check-secrets.mjs` (no dependencies; patterns, forbidden paths like `.env`/`*.db`/`*.pem`, and the exact values in the local `.env`, never printed) runs from `.githooks/pre-commit` (`npm install` sets `core.hooksPath`; gitleaks runs too if installed) and in `.github/workflows/secrets.yml` with gitleaks over the full history, plus `npm test`. Test fakes are built at runtime (string concatenation) so they don't trip the scanner; a deliberate fake line can end with `secret-scan: allow`.
+  - Audited Oct 13, 2026: no secret in any commit (exact `.env` values and gitleaks), none in the browser bundle.
 - Workspaces (`src/workspace.ts`): `openWorkspace` builds one set of stores (call log, approvals, webhooks, operations, agent keys, policy, audit chain) plus the gate and explainer on a database. The real deployment has one, on `handrail.db`; accounts and sessions stay global.
 - Demo isolation (`src/demo/`, tests in `test/auth.test.ts`):
   - `DemoService` gives every demo session (keyed by session-token hash) its own workspace on an in-memory database, with a copy of the policy (`PolicyStore` with a null path: never written to disk) and a "Demo agent" key.
@@ -91,6 +97,7 @@ TypeScript, Node.js, the official MCP TypeScript SDK (Handrail is an MCP server 
 - `npm run approvals [-- approve|reject <id> [note]]`: decide held calls via the admin API (uses `HANDRAIL_ADMIN_TOKEN`; local only, recorded as "Admin script").
 - `npm run audit:verify`: checks the hash chain and that the working tables match it; exits 1 on tampering.
 - `npm run probe`: re-checks which PayPal MCP endpoints work.
+- `npm run check:secrets`: scans every tracked file for secrets (the pre-commit hook checks staged changes).
 - `npm run check:drop-in [-- --update]`: compares what an agent sees from PayPal's MCP server with what it sees from Handrail; exits 1 on any difference beyond the documented additions.
 
 ## Auth
