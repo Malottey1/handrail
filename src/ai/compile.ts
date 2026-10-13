@@ -74,6 +74,7 @@ How rules work:
   - tool: always applies the decision to the listed tools.
   - amount_ceiling: fires when one call's amount is over max (a string like "250.00") in currency (ISO code like "USD").
   - spend_limit: fires when the total of calls in the last windowSeconds, including this one, would exceed max in currency.
+  - cumulative_limit (create_refund only): fires when refunds on the same capture, order, payer or agent ("per"), including this one and held ones, would exceed max in currency. Use it for "refunds on one order/payment/customer over $X" and "an agent refunding more than $X a day". windowSeconds only with per payer or agent (agent defaults to a day).
   - rate_limit: fires when more than max (an integer count) calls of the listed tools were already sent in the last windowSeconds.
   - payee_allowlist: fires when the counterparty email is not in allow (full addresses, or domains written "@example.com").
 - Windows are in seconds: hour 3600, day 86400, week 604800.
@@ -99,6 +100,7 @@ const KIND_WORDS: Record<Rule["type"], string> = {
   spend_limit: "spending limit",
   rate_limit: "rate limit",
   payee_allowlist: "payee allowlist",
+  cumulative_limit: "running-total limit",
 };
 
 /** Handrail's own notes on what a change does, computed from the rules. */

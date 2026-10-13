@@ -44,6 +44,29 @@ export class SettingsStore {
       : { set: false, masked: null, updatedAt: null, updatedBy: null };
   }
 
+  /** Setup checklist items an admin confirmed by hand: who and when. */
+  confirmations(): Record<string, { by: string; at: number }> {
+    const row = this.db.prepare(`SELECT value FROM settings WHERE key = 'setup_confirmations'`).get() as { value: string } | undefined;
+    return row ? (JSON.parse(row.value) as Record<string, { by: string; at: number }>) : {};
+  }
+
+  /** Confirms (or un-confirms) a setup checklist item. Recorded in the audit log. */
+  setConfirmation(item: string, confirmed: boolean, by: { id: string; name: string }, now: number): void {
+    const next = this.confirmations();
+    if (confirmed) next[item] = { by: by.name, at: now };
+    else delete next[item];
+    this.chain.record(now, () => {
+      this.db
+        .prepare(
+          `INSERT INTO settings (key, value, updated_at, updated_by) VALUES ('setup_confirmations', ?, ?, ?)
+           ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, updated_by = excluded.updated_by`,
+        )
+        .run(JSON.stringify(next), now, by.name);
+      const data = { setting: `setup:${item}`, change: confirmed ? "confirmed" : "unconfirmed", by };
+      return { value: undefined, entries: [{ kind: "settings.changed" as const, ref: `settings:setup:${item}`, data }] };
+    });
+  }
+
   /** Sets (or with null, removes) the Slack webhook. */
   setSlackWebhook(url: string | null, by: { id: string; name: string }, now: number): void {
     const value = url?.trim() || null;

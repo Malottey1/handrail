@@ -81,7 +81,7 @@ describe("AI explanations", () => {
     callLog.begin(facts("250.00"), held, { forwarded: false, approvalId: approval.id, now: NOW });
 
     const prompt = buildExplainPrompt({ approval, policy: POLICY, recentCalls: callLog.since(NOW - 86400_000) });
-    assert.match(prompt, /Amount: 250\.00 USD \(from the agent's arguments\)/);
+    assert.match(prompt, /Amount: 250\.00 USD \(requested in the agent's arguments\)/);
     assert.match(prompt, /2 earlier Refund call\(s\) sent to PayPal, totalling 55\.00 USD/);
     assert.match(prompt, /Earlier calls on the same PayPal object \(CAP1\):\n- .*Refund 40\.00 USD, decision allow, outcome succeeded\n\n/);
     assert.match(prompt, /refund-hard-cap-1000: Refund over 1,000\.00 USD → Blocked/);
@@ -257,7 +257,7 @@ describe("structured output schema", () => {
     const out = structuredSchema(z.toJSONSchema(ruleSchema)) as Record<string, any>;
     const json = JSON.stringify(out);
     assert.equal(out.oneOf, undefined);
-    assert.equal(out.anyOf.length, 5);
+    assert.equal(out.anyOf.length, 6);
     for (const banned of ["$schema", "minLength", "pattern", "exclusiveMinimum", "maximum"]) assert.ok(!json.includes(`"${banned}"`), banned);
     for (const variant of out.anyOf) assert.equal(variant.additionalProperties, false);
     assert.equal(out.anyOf[0].properties.tools.minItems, 1);

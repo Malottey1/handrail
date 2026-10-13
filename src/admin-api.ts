@@ -23,6 +23,7 @@ import { log } from "./log.js";
 import { postToSlack, type EmailSender, type SlackPoster } from "./notify/channels.js";
 import type { AlertRecord } from "./notify/notifier.js";
 import { SettingsError, type SettingsStore } from "./notify/settings.js";
+import { agentClaims } from "./policy/claims.js";
 import { PolicyConflictError } from "./policy/store.js";
 import { redact } from "./redact.js";
 import type { MatchStatus } from "./webhooks.js";
@@ -47,6 +48,8 @@ export interface AdminDeps extends HttpOptions {
   email: EmailSender | null;
   /** For the "Send test alert" button (faked in tests). */
   postSlack?: SlackPoster;
+  /** For the Setup checklist: where agents and PayPal reach Handrail, and whether webhooks are on. */
+  setup?: { publicUrl: string; webhooksConfigured: boolean };
   now?: () => number;
 }
 
@@ -133,6 +136,10 @@ function present(a: Approval, alert: AlertRecord | null = null) {
     explanationStatus: a.explanationStatus,
     explanationModel: a.explanationModel,
     alert: presentAlert(alert),
+    // Kept apart on purpose: what PayPal confirmed, and what the agent claims.
+    verified: a.facts.verified ?? null,
+    agentSays: agentClaims(a.args),
+    totals: a.evaluation.hits.flatMap((h) => (h.total ? [{ ruleId: h.ruleId, decision: h.decision, ...h.total }] : [])),
   };
 }
 
@@ -159,6 +166,9 @@ function summary(ws: ApiWorkspace) {
       flagged: webhooks.filter((w) => w.status === "mismatch" || w.status === "outside_handrail").length,
     },
     alerts: ws.notifier.channels(),
+    unattributed: {
+      last30d: ws.webhooks.unattributed(1000).filter((e) => Date.parse(e.receivedAt) > Date.now() - 30 * DAY_MS).length,
+    },
   };
 }
 
@@ -207,7 +217,7 @@ const actorRef = (principal: Principal) => ({ id: principal.user.id, name: princ
  *
  * Public:   GET  /api/auth/session, GET /api/auth/invite?token=
  *           POST /api/auth/signup, /api/auth/login, /api/auth/demo
- * viewer:   GET  /api/summary, /api/approvals[/:id], /api/calls, /api/webhooks,
+ * viewer:   GET  /api/summary, /api/approvals[/:id], /api/calls, /api/webhooks, /api/unattributed, /api/setup,
  *                /api/audit, /api/audit/verify, /api/policy
  *           POST /api/auth/logout; PATCH /api/me, /api/me/alerts; POST /api/me/password
  *           GET/POST /api/demo/run (demo account only: the demo agent)
@@ -215,7 +225,7 @@ const actorRef = (principal: Principal) => ({ id: principal.user.id, name: princ
  * admin:    POST /api/policy/compile; PUT /api/policy
  *           GET/PATCH /api/users[/:id]; GET/POST/DELETE /api/invites[/:id]
  *           GET/POST/DELETE /api/agent-keys[/:id]
- *           GET/PUT /api/settings/alerts; POST /api/settings/alerts/test
+ *           GET/PUT /api/settings/alerts; POST /api/settings/alerts/test; POST /api/setup/:item
  *
  * Every route but the public ones requires a session cookie (plus the CSRF
  * header on changes) or the HANDRAIL_ADMIN_TOKEN bearer token, and its role.
@@ -335,6 +345,89 @@ export function createAdminApi(deps: AdminDeps): (req: IncomingMessage, res: Ser
     };
   }
 
+  /**
+   * The Setup checklist. Some items Handrail can check itself; the ones about
+   * the agent's own environment (no PayPal credentials, no direct connection)
+   * only a person can confirm.
+   */
+  function setupChecklist(ws: ApiWorkspace, demo = false) {
+    const publicUrl = deps.setup?.publicUrl ?? "http://127.0.0.1:8787";
+    // Demo sessions see their own workspace, never who confirmed what in the real deployment.
+    const confirmed = demo ? {} : deps.settings.confirmations();
+    const activeKeys = ws.agentKeys.list().filter((k) => !k.revokedAt);
+    const recentAgents = new Set(ws.callLog.recent(200).map((c) => c.agent_name).filter(Boolean));
+    const unattributed = ws.webhooks.unattributed(1000).filter((e) => Date.parse(e.receivedAt) > Date.now() - 30 * DAY_MS).length;
+    const alerts = ws.notifier.channels();
+    const manual = (id: string, label: string, detail: string) => ({
+      id,
+      kind: "confirm" as const,
+      label,
+      detail,
+      ok: id in confirmed,
+      confirmedBy: confirmed[id]?.by ?? null,
+      confirmedAt: confirmed[id] ? new Date(confirmed[id]!.at).toISOString() : null,
+    });
+    const auto = (id: string, label: string, ok: boolean, detail: string) => ({ id, kind: "auto" as const, label, ok, detail });
+    return {
+      mcpUrl: `${publicUrl}/mcp`,
+      webhookUrl: `${publicUrl}/webhooks/paypal`,
+      items: [
+        manual(
+          "agent-no-credentials",
+          "The agent has no PayPal credentials",
+          "Remove PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET and any PayPal access token from the agent's environment, config and secrets store. With them, it could call PayPal without Handrail.",
+        ),
+        manual(
+          "agent-no-direct-paypal",
+          "The agent has no direct PayPal connection",
+          "Its MCP config lists only Handrail: no mcp.paypal.com server, no local @paypal/mcp, and no Agent Toolkit set up with credentials.",
+        ),
+        manual(
+          "credentials-only-in-handrail",
+          "PayPal credentials live only in Handrail",
+          "The client id and secret are set in Handrail's server environment and nowhere an agent can read. If an agent ever had them, rotate the secret in PayPal's developer dashboard.",
+        ),
+        auto("handrail-has-credentials", "Handrail holds the PayPal credentials", true, "Handrail gets its own access tokens; agents never see them."),
+        auto(
+          "agents-use-keys",
+          "Agents connect to Handrail",
+          activeKeys.length > 0 || recentAgents.size > 0,
+          activeKeys.length || recentAgents.size
+            ? `${activeKeys.length} active agent key${activeKeys.length === 1 ? "" : "s"}${recentAgents.size ? `; recent calls from ${[...recentAgents].join(", ")}` : ""}.`
+            : "No agent keys yet and no agent calls. Create a key in Team & keys, or start Handrail over stdio from the agent.",
+        ),
+        auto(
+          "webhooks",
+          "PayPal webhooks reach Handrail",
+          deps.setup?.webhooksConfigured ?? false,
+          deps.setup?.webhooksConfigured
+            ? "Actions PayPal reports that didn't go through Handrail are flagged."
+            : "Set PAYPAL_WEBHOOK_ID and register the webhook URL below in PayPal, or actions that bypass Handrail won't be noticed.",
+        ),
+        auto(
+          "no-unattributed",
+          "Nothing bypassed Handrail in the last 30 days",
+          unattributed === 0,
+          unattributed === 0
+            ? "Every refund, dispute concession and cancellation PayPal reported went through Handrail."
+            : `${unattributed} action${unattributed === 1 ? "" : "s"} PayPal reported didn't go through Handrail. See Activity.`,
+        ),
+        auto(
+          "alerts",
+          "Someone is alerted about held calls and bypasses",
+          alerts.mode === "preview" || alerts.email || alerts.slack,
+          alerts.mode === "preview"
+            ? "Demo workspace: alerts are shown as previews."
+            : alerts.email || alerts.slack
+              ? `By ${[alerts.email && "email", alerts.slack && "Slack"].filter(Boolean).join(" and ")}.`
+              : "Alerts are off. Set up email or Slack under Account.",
+        ),
+      ],
+    };
+  }
+
+  const SETUP_CONFIRMABLE = new Set(["agent-no-credentials", "agent-no-direct-paypal", "credentials-only-in-handrail"]);
+
   const routes: Route[] = [
     { method: "POST", path: "auth/logout", role: "viewer", handle: ({ req, res, principal }) => {
       if (principal.kind === "session") deps.accounts.deleteSession(principal.token);
@@ -413,6 +506,21 @@ export function createAdminApi(deps: AdminDeps): (req: IncomingMessage, res: Ser
     } },
 
     { method: "GET", path: "summary", role: "viewer", handle: ({ res, ws }) => send(res, 200, summary(ws)) },
+
+    { method: "GET", path: "setup", role: "viewer", handle: ({ res, ws, principal }) =>
+      send(res, 200, setupChecklist(ws, principal.kind === "session" && principal.user.isDemo)) },
+
+    { method: "POST", path: "setup/:item", role: "admin", handle: async ({ req, res, principal, params, now, ws }) => {
+      const item = params[0]!;
+      if (!SETUP_CONFIRMABLE.has(item)) throw new HttpError(404, "No such checklist item to confirm.");
+      const body = await readBody(req);
+      if (typeof body.confirmed !== "boolean") throw new HttpError(400, "confirmed must be true or false.");
+      deps.settings.setConfirmation(item, body.confirmed, actorOf(principal, body), now);
+      send(res, 200, setupChecklist(ws));
+    } },
+
+    { method: "GET", path: "unattributed", role: "viewer", handle: ({ res, ws }) =>
+      send(res, 200, ws.webhooks.unattributed().map((e) => ({ ...e, alert: presentAlert(ws.alerts.get(`webhook:${e.eventId}`)) }))) },
 
     { method: "GET", path: "approvals", role: "viewer", handle: ({ res, url, ws }) => {
       const status = url.searchParams.get("status") as ApprovalStatus | null;

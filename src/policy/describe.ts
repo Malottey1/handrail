@@ -44,6 +44,11 @@ export function describeRule(rule: Rule): string {
       return `${tools(rule.tools)} totalling more than ${money(rule.max, rule.currency)} in ${duration(rule.windowSeconds)}`;
     case "payee_allowlist":
       return `${tools(rule.tools)} to anyone other than ${rule.allow.join(", ")}`;
+    case "cumulative_limit": {
+      const per = { capture: "payment (capture)", order: "order", payer: "customer", agent: "agent" }[rule.per];
+      const window = rule.windowSeconds ?? (rule.per === "agent" ? 86400 : null);
+      return `Refunds on one ${per} totalling more than ${money(rule.max, rule.currency)}${window ? ` in ${duration(window)}` : ""}, including held ones`;
+    }
   }
 }
 

@@ -27,7 +27,7 @@ import { handleMcp } from "../src/mcp-endpoint.js";
 import type { PayPalRest } from "../src/paypal/rest.js";
 import { parsePolicy } from "../src/policy/load.js";
 import { PolicyStore } from "../src/policy/store.js";
-import type { CallFacts, Evaluation } from "../src/policy/types.js";
+import type { CallFacts, Evaluation, Policy } from "../src/policy/types.js";
 import { WebhookStore } from "../src/webhooks.js";
 import type { EmailMessage, EmailSender } from "../src/notify/channels.js";
 import { AlertStore, LiveNotifier, PreviewNotifier } from "../src/notify/notifier.js";
@@ -57,8 +57,9 @@ class FakeEmail implements EmailSender {
 }
 
 async function setup(
-  opts: { demoAccess?: boolean; cookieSecure?: boolean | "auto"; adminToken?: string | undefined; email?: boolean; ttlMs?: number } = {},
+  opts: { demoAccess?: boolean; cookieSecure?: boolean | "auto"; adminToken?: string | undefined; email?: boolean; ttlMs?: number; policy?: Policy } = {},
 ) {
+  const POLICY_IN_FORCE = opts.policy ?? POLICY;
   const db = new DatabaseSync(":memory:");
   const audit = new AuditChain(db);
   const callLog = new CallLog(db, audit);
@@ -82,8 +83,8 @@ async function setup(
   });
   const alertsDone: Array<Promise<void>> = [];
   const policyPath = join(mkdtempSync(join(tmpdir(), "handrail-auth-")), "policy.json");
-  writeFileSync(policyPath, JSON.stringify(POLICY));
-  const policy = new PolicyStore(policyPath, audit, POLICY);
+  writeFileSync(policyPath, JSON.stringify(POLICY_IN_FORCE));
+  const policy = new PolicyStore(policyPath, audit, POLICY_IN_FORCE);
 
   const sent: string[] = [];
   const answer = async (name: string): Promise<CallToolResult> => {
@@ -682,9 +683,10 @@ describe("demo agent and demo isolation", () => {
     assert.equal(status.run.status, "done", JSON.stringify(status.run));
     assert.deepEqual(
       status.run.steps.map((s: { id: string; status: string }) => [s.id, s.status]),
-      [["sale", "done"], ["small", "done"], ["large", "done"], ["retry", "done"]],
+      [["sale", "done"], ["small", "done"], ["large", "done"], ["retry", "done"], ["split", "done"]],
     );
-    assert.deepEqual(status.run.plan, { limit: "100.00", ruleId: "approve-over-100", small: "5.00", large: "120.00", sale: "125.00" });
+    assert.match(status.run.steps[4].outcome, /Skipped/, "this policy has no per-payment total");
+    assert.deepEqual(status.run.plan, { limit: "100.00", ruleId: "approve-over-100", small: "5.00", large: "120.00", sale: "125.00", split: null });
     assert.deepEqual(ctx.demoSent, ["create_refund"], "only the small refund reached PayPal");
 
     const calls = (await judge.req("GET", "/api/calls")).data.reverse();
@@ -706,6 +708,30 @@ describe("demo agent and demo isolation", () => {
     assert.deepEqual(ctx.sent, [], "nothing went through the real gate");
     assert.equal(ctx.callLog.recent(10).length, 0);
     assert.equal(ctx.approvals.list().length, 0);
+  });
+
+  it("split refunds: three small ones on one payment, the third held by the running total", async () => {
+    const policy = parsePolicy({
+      ...POLICY,
+      rules: [
+        ...POLICY.rules,
+        { id: "refund-capture-total-over-100", type: "cumulative_limit", tools: ["create_refund"], per: "capture", max: "100.00", currency: "USD", decision: "require_approval" },
+      ],
+    });
+    const ctx = await setup({ demoAccess: true, policy });
+    const judge = await signInDemo(ctx);
+    const status = await runToEnd(judge);
+    const split = status.run.steps.find((s: { id: string }) => s.id === "split");
+    assert.equal(split.status, "done", split.outcome);
+    assert.match(split.outcome, /40\.00 sent · 40\.00 sent · 40\.00 held: Refunds on this capture would total 120\.00 USD/);
+    assert.deepEqual(status.run.plan.split, { each: "40.00", limit: "100.00", ruleId: "refund-capture-total-over-100", sale: "125.00" });
+
+    const pending = (await judge.req("GET", "/api/approvals?status=pending")).data;
+    const held = pending.find((a: { amount: { hundredths: number } }) => a.amount.hundredths === 4000);
+    assert.deepEqual(
+      held.totals.map((t: { per: string; already: number; held: number; thisCall: number; total: number; limit: number }) => [t.per, t.already, t.held, t.thisCall, t.total, t.limit]),
+      [["capture", 8000, 0, 4000, 12000, 10000]],
+    );
   });
 
   it("limits runs to one a minute per session", async () => {

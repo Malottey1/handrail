@@ -1,6 +1,7 @@
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from "node:http";
 import type { CallLog } from "./audit.js";
 import { log } from "./log.js";
+import type { HeldNotifier } from "./notify/notifier.js";
 import type { PayPalRest } from "./paypal/rest.js";
 import { EVENT_RULES, matchEvent, parseForwardedCall, type WebhookEvent, type WebhookStore } from "./webhooks.js";
 
@@ -19,7 +20,9 @@ export interface WebhookDeps {
    * Events about objects a demo run created go to that demo workspace's
    * stores ("drop" once it's gone), so demo activity never lands in real data.
    */
-  demo?: { routeWebhook(resourceIds: string[]): { callLog: CallLog; webhooks: WebhookStore } | "drop" | null } | null;
+  demo?: { routeWebhook(resourceIds: string[]): { callLog: CallLog; webhooks: WebhookStore; notifier: HeldNotifier } | "drop" | null } | null;
+  /** Alerts approvers about actions that didn't go through Handrail (the same path as held calls). */
+  notifier?: HeldNotifier | null;
 }
 
 /** The PayPal objects an event is about: the resource, what it links "up" to, and related ids. */
@@ -100,6 +103,7 @@ export async function handleWebhook(req: IncomingMessage, res: ServerResponse, d
   }
   const store = routed?.webhooks ?? deps.store;
   const callLog = routed?.callLog ?? deps.callLog;
+  const notifier = routed ? routed.notifier : (deps.notifier ?? null);
 
   if (store.has(event.id)) {
     return send(res, 200, { ok: true, duplicate: true });
@@ -114,7 +118,22 @@ export async function handleWebhook(req: IncomingMessage, res: ServerResponse, d
   const rule = EVENT_RULES[event.event_type];
   const calls = rule ? callLog.forwardedCalls(rule.tool, Date.now() - MATCH_WINDOW_MS).map(parseForwardedCall) : [];
   const match = matchEvent(event, calls);
-  store.insert(event, verified, match, raw, Date.now());
+  const inserted = store.insert(event, verified, match, raw, Date.now());
+
+  // Not sent through Handrail: alert like a held call (fire-and-forget; PayPal gets its 200 regardless).
+  if (inserted && match.status === "outside_handrail" && notifier) {
+    void notifier
+      .unattributed({
+        eventId: event.id,
+        eventType: event.event_type,
+        tool: match.tool,
+        resourceId: match.resourceId,
+        amount: rule?.amount?.(event.resource ?? {}) ?? null,
+        reason: match.reasons[0] ?? "No agent call through Handrail made this.",
+        at: Date.now(),
+      })
+      .catch((err: Error) => log(`Alert for webhook ${event.id} failed: ${err.message}`));
+  }
 
   const flag = match.status === "mismatch" || match.status === "outside_handrail" ? " FLAGGED" : "";
   log(

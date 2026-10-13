@@ -17,6 +17,26 @@
       "decision": "require_approval"
     },
     {
+      "id": "refund-capture-total-over-100",
+      "description": "Refunds on one payment adding up to more than $100 need a human, so a large refund can't be split into small ones",
+      "type": "cumulative_limit",
+      "tools": ["create_refund"],
+      "per": "capture",
+      "max": "100.00",
+      "currency": "USD",
+      "decision": "require_approval"
+    },
+    {
+      "id": "refund-agent-daily-300",
+      "description": "One agent refunding more than $300 in a day needs a human",
+      "type": "cumulative_limit",
+      "tools": ["create_refund"],
+      "per": "agent",
+      "max": "300.00",
+      "currency": "USD",
+      "decision": "require_approval"
+    },
+    {
       "id": "refund-hard-cap-1000",
       "description": "Agents can never refund more than $1,000 in one call",
       "type": "amount_ceiling",

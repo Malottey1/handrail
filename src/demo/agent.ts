@@ -10,7 +10,7 @@ import type { DemoSale } from "./sale.js";
 export type StepStatus = "waiting" | "running" | "done" | "unexpected" | "failed";
 
 export interface DemoStep {
-  id: "sale" | "small" | "large" | "retry";
+  id: "sale" | "small" | "large" | "retry" | "split";
   title: string;
   /** What Handrail should do, given the policy. */
   expect: string;
@@ -38,6 +38,12 @@ export interface DemoPlan {
   large: string;
   /** The sandbox sale the refunds come out of. */
   sale: string;
+  /**
+   * Split refunds: three equal refunds on a second sale, each under the
+   * single-refund limit, the third pushing the per-capture total over a
+   * cumulative_limit. Null when the policy has no such rule.
+   */
+  split: { each: string; limit: string; ruleId: string; sale: string } | null;
 }
 
 /**
@@ -55,12 +61,27 @@ export function planDemo(policy: Policy): DemoPlan | string {
   const small = Math.min(500, Math.floor(hold.max / 2));
   const large = Math.min(hold.max + 2000, Math.floor((hold.max + cap) / 2));
   if (large <= hold.max) return `The refund limit (${formatHundredths(hold.max)} USD) sits right under a hard cap, so the demo can't hold a refund without it being blocked.`;
+
+  // Three refunds of 40% of the per-capture total: two fit, the third doesn't. Each stays under the single-refund limit.
+  const totals = policy.rules.flatMap((r) =>
+    r.type === "cumulative_limit" && r.per === "capture" && r.tools.includes("create_refund") && r.currency === "USD" && r.decision === "require_approval"
+      ? [{ rule: r, max: toHundredths(r.max)! }]
+      : [],
+  );
+  const total = totals.sort((a, b) => a.max - b.max)[0];
+  const each = total ? Math.floor((total.max * 0.4) / 100) * 100 || Math.ceil(total.max * 0.4) : 0;
+  const split =
+    total && each > 0 && each <= hold.max && each * 2 <= total.max && each * 3 > total.max
+      ? { each: formatHundredths(each), limit: formatHundredths(total.max), ruleId: total.rule.id, sale: formatHundredths(each * 3 + 500) }
+      : null;
+
   return {
     limit: formatHundredths(hold.max),
     ruleId: hold.rule.id,
     small: formatHundredths(small),
     large: formatHundredths(large),
     sale: formatHundredths(small + large),
+    split,
   };
 }
 
@@ -79,6 +100,13 @@ export function newDemoRun(plan: DemoPlan, now: number): DemoRun {
       step("small", `Agent refunds ${plan.small} USD`, `Allowed: under the ${plan.limit} USD limit, so it goes straight to PayPal.`),
       step("large", `Agent refunds ${plan.large} USD`, `Held: over the ${plan.limit} USD limit, so a person decides. The card gets an AI brief.`),
       step("retry", `Agent retries the ${plan.large} USD refund`, "Recognised as the same request: not sent again, and no second approval."),
+      plan.split
+        ? step(
+            "split",
+            `Agent splits a refund: three of ${plan.split.each} USD on one payment`,
+            `Each is under the ${plan.limit} USD limit, but together they pass the ${plan.split.limit} USD per-payment total: the first two go through, the third is held.`,
+          )
+        : step("split", "Agent splits a refund into small ones", "Skipped: the policy has no per-payment refund total (cumulative_limit per capture)."),
     ],
   };
 }
@@ -114,13 +142,22 @@ export async function runDemoAgent(run: DemoRun, deps: DemoAgentDeps): Promise<v
       .filter((r) => r.id > afterId && r.agent_key_id === deps.agentKeyId)
       .reverse();
 
-  async function agentCall(id: DemoStep["id"], value: string): Promise<{ result: CallToolResult; rows: CallRow[] }> {
+  async function agentCall(
+    id: DemoStep["id"],
+    value: string,
+    opts: { captureId?: string; idempotencyKey?: string } = {},
+  ): Promise<{ result: CallToolResult; rows: CallRow[] }> {
     const s = step(id);
     s.status = "running";
     const before = lastId();
     const result = (await client!.callTool({
       name: "create_refund",
-      arguments: { capture_id: run.captureId, amount: { currency_code: "USD", value }, note_to_payer: "Sorry, your order arrived damaged." },
+      arguments: {
+        capture_id: opts.captureId ?? run.captureId,
+        amount: { currency_code: "USD", value },
+        note_to_payer: "Sorry, your order arrived damaged.",
+        ...(opts.idempotencyKey ? { idempotency_key: opts.idempotencyKey } : {}),
+      },
     })) as CallToolResult;
     return { result, rows: rowsAfter(before) };
   }
@@ -181,6 +218,37 @@ export async function runDemoAgent(run: DemoRun, deps: DemoAgentDeps): Promise<v
         s.status = "unexpected";
         s.outcome = describeRow(forwarded[0], result);
       }
+    }
+
+    // Split refunds: a second customer's payment, refunded in three pieces that each look small.
+    const split = run.plan.split;
+    const s = step("split");
+    if (!split) {
+      s.status = "done";
+      s.outcome = "Skipped: add a cumulative_limit rule per capture to the policy to see split refunds caught.";
+    } else {
+      s.status = "running";
+      const second = await deps.createSale(split.sale);
+      deps.onSale(second);
+      const results: string[] = [];
+      let ok = true;
+      for (let i = 1; i <= 3; i++) {
+        // Distinct idempotency keys: these are three separate refunds, not retries.
+        const { rows } = await agentCall("split", split.each, { captureId: second.captureId, idempotencyKey: `${run.id}-split-${i}` });
+        const row = rows[0];
+        const hits = row ? (JSON.parse(row.hits_json) as Array<{ ruleId: string }>) : [];
+        if (i < 3) {
+          const sent = row?.decision === "allow" && row.outcome === "succeeded";
+          ok &&= sent;
+          results.push(sent ? `${split.each} sent` : `${split.each}: ${describeRow(row, { content: [] })}`);
+        } else {
+          const heldByTotal = row?.decision === "require_approval" && hits.some((h) => h.ruleId === split.ruleId);
+          ok &&= heldByTotal;
+          results.push(heldByTotal ? `${split.each} held: ${row!.reason}` : `${split.each}: ${describeRow(row, { content: [] })}`);
+        }
+      }
+      s.status = ok ? "done" : "unexpected";
+      s.outcome = `On capture ${second.captureId}: ${results.join(" · ")}`;
     }
 
     run.status = "done";

@@ -55,6 +55,8 @@ interface Entry {
  * spend limits count only their own runs, and nothing they do touches real
  * data. Workspaces are discarded after `idleMs` without use.
  *
+ * Each run after the first starts in a fresh workspace.
+ *
  * Runs are limited: one at a time per workspace, one per minute per session,
  * 10 per hour per address and 60 per hour overall, since each makes real
  * sandbox calls and (with AI on) a model call.
@@ -115,7 +117,7 @@ export class DemoService {
   /** Starts the demo agent in the background and returns the run, which fills in as it goes. */
   start(sessionToken: string, ip: string): DemoRun {
     const key = tokenHash(sessionToken);
-    const entry = this.entry(sessionToken);
+    let entry = this.entry(sessionToken);
     const now = this.now();
     if (entry.run?.status === "running") throw new DemoError(409, "The demo agent is already running.");
     for (const [limiter, k, what] of [
@@ -133,6 +135,13 @@ export class DemoService {
     this.perSession.fail(key, now);
     this.perIp.fail(ip, now);
     this.overall.fail("all", now);
+
+    // Each run after the first starts in a fresh workspace, so the last run's
+    // refunds don't count against this one's rate and spend limits.
+    if (entry.run) {
+      this.discard(key);
+      entry = this.entry(sessionToken);
+    }
 
     const run = newDemoRun(plan, now);
     entry.run = run;

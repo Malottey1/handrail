@@ -4,7 +4,7 @@ import { AuditChain } from "../audit-chain.js";
 import { log } from "../log.js";
 import { redact } from "../redact.js";
 import type { EmailSender, SlackPoster } from "./channels.js";
-import { composeHeldAlert, type HeldAlert } from "./compose.js";
+import { composeHeldAlert, composeUnattributedAlert, type ComposedAlert, type UnattributedInfo } from "./compose.js";
 
 /**
  * sent     every channel that was on delivered it
@@ -18,7 +18,8 @@ import { composeHeldAlert, type HeldAlert } from "./compose.js";
 export type AlertStatus = "sent" | "partial" | "failed" | "off" | "nobody" | "skipped" | "preview";
 
 export interface AlertRecord {
-  approvalId: string;
+  /** The approval id, or "webhook:<event id>" for an action that didn't go through Handrail. */
+  ref: string;
   at: number;
   status: AlertStatus;
   /** Names of the people emailed (never their addresses), and what happened per channel. */
@@ -28,7 +29,7 @@ export interface AlertRecord {
   preview: { subject: string; text: string } | null;
 }
 
-/** One row per held call's alert, in the workspace's database. Each is also an audit entry. */
+/** One row per alert (a held call, or an unattributed PayPal action), in the workspace's database. Each is also an audit entry. */
 export class AlertStore {
   constructor(
     private readonly db: DatabaseSync,
@@ -36,7 +37,7 @@ export class AlertStore {
   ) {
     db.exec(`
       CREATE TABLE IF NOT EXISTS alerts (
-        approval_id  TEXT    PRIMARY KEY,
+        ref          TEXT    PRIMARY KEY,
         at           INTEGER NOT NULL,
         status       TEXT    NOT NULL,
         email_json   TEXT,
@@ -49,27 +50,27 @@ export class AlertStore {
   record(alert: AlertRecord): void {
     this.chain.record(alert.at, () => {
       this.db
-        .prepare(`INSERT OR REPLACE INTO alerts (approval_id, at, status, email_json, slack, preview_json) VALUES (?, ?, ?, ?, ?, ?)`)
+        .prepare(`INSERT OR REPLACE INTO alerts (ref, at, status, email_json, slack, preview_json) VALUES (?, ?, ?, ?, ?, ?)`)
         .run(
-          alert.approvalId,
+          alert.ref,
           alert.at,
           alert.status,
           alert.email ? JSON.stringify(alert.email) : null,
           alert.slack,
           alert.preview ? JSON.stringify(alert.preview) : null,
         );
-      const data = { approvalId: alert.approvalId, status: alert.status, email: alert.email, slack: alert.slack };
-      return { value: undefined, entries: [{ kind: "alert.sent" as const, ref: `alert:${alert.approvalId}`, data }] };
+      const data = { about: alert.ref, status: alert.status, email: alert.email, slack: alert.slack };
+      return { value: undefined, entries: [{ kind: "alert.sent" as const, ref: `alert:${alert.ref}`, data }] };
     });
   }
 
-  get(approvalId: string): AlertRecord | null {
-    const row = this.db.prepare(`SELECT * FROM alerts WHERE approval_id = ?`).get(approvalId) as
-      | { approval_id: string; at: number; status: AlertStatus; email_json: string | null; slack: "sent" | "failed" | null; preview_json: string | null }
+  get(ref: string): AlertRecord | null {
+    const row = this.db.prepare(`SELECT * FROM alerts WHERE ref = ?`).get(ref) as
+      | { ref: string; at: number; status: AlertStatus; email_json: string | null; slack: "sent" | "failed" | null; preview_json: string | null }
       | undefined;
     if (!row) return null;
     return {
-      approvalId: row.approval_id,
+      ref: row.ref,
       at: row.at,
       status: row.status,
       email: row.email_json ? JSON.parse(row.email_json) : null,
@@ -94,7 +95,10 @@ export interface Recipient {
 
 export interface HeldNotifier {
   channels(): AlertChannels;
+  /** A call was held for approval. */
   held(approval: Approval): Promise<void>;
+  /** PayPal reported a money-out action that didn't go through Handrail. */
+  unattributed(info: UnattributedInfo): Promise<void>;
 }
 
 export interface LiveNotifierDeps {
@@ -118,19 +122,34 @@ export class LiveNotifier implements HeldNotifier {
   }
 
   async held(approval: Approval): Promise<void> {
-    const now = this.deps.now ?? Date.now;
-    const base = { approvalId: approval.id, preview: null };
-    const { email: emailOn, slack: slackOn } = this.channels();
-    if (!emailOn && !slackOn) {
-      this.deps.alerts.record({ ...base, at: now(), status: "off", email: null, slack: null });
-      return;
-    }
+    const ref = approval.id;
+    if (!this.anyChannel(ref)) return;
     if (approval.status !== "pending") {
-      this.deps.alerts.record({ ...base, at: now(), status: "skipped", email: null, slack: null });
+      this.deps.alerts.record({ ref, at: this.now(), status: "skipped", email: null, slack: null, preview: null });
       return;
     }
+    await this.deliver(ref, composeHeldAlert(approval, this.deps.baseUrl));
+  }
 
-    const alert = composeHeldAlert(approval, this.deps.baseUrl);
+  async unattributed(info: UnattributedInfo): Promise<void> {
+    const ref = `webhook:${info.eventId}`;
+    if (!this.anyChannel(ref)) return;
+    await this.deliver(ref, composeUnattributedAlert(info, this.deps.baseUrl));
+  }
+
+  private now(): number {
+    return (this.deps.now ?? Date.now)();
+  }
+
+  /** Records "off" and returns false when there's nothing to send through. */
+  private anyChannel(ref: string): boolean {
+    const { email, slack } = this.channels();
+    if (email || slack) return true;
+    this.deps.alerts.record({ ref, at: this.now(), status: "off", email: null, slack: null, preview: null });
+    return false;
+  }
+
+  private async deliver(ref: string, alert: ComposedAlert): Promise<void> {
     let delivered = 0;
     let failures = 0;
 
@@ -145,7 +164,7 @@ export class LiveNotifier implements HeldNotifier {
         } catch (err) {
           email.failed++;
           failures++;
-          log(`Alert email for ${approval.id} to ${r.name} failed: ${(err as Error).message}`);
+          log(`Alert email (${ref}) to ${r.name} failed: ${(err as Error).message}`);
         }
       }
     }
@@ -160,13 +179,13 @@ export class LiveNotifier implements HeldNotifier {
       } catch (err) {
         slack = "failed";
         failures++;
-        log(`Alert to Slack for ${approval.id} failed: ${redact((err as Error).message)}`);
+        log(`Alert to Slack (${ref}) failed: ${redact((err as Error).message)}`);
       }
     }
 
     const status: AlertStatus = failures === 0 ? (delivered === 0 ? "nobody" : "sent") : delivered === 0 ? "failed" : "partial";
-    this.deps.alerts.record({ ...base, at: now(), status, email, slack });
-    log(`Alert for ${approval.id}: ${status} (email to ${email?.to.length ?? 0}${slack ? `, Slack ${slack}` : ""})`);
+    this.deps.alerts.record({ ref, at: this.now(), status, email, slack, preview: null });
+    log(`Alert ${ref}: ${status} (email to ${email?.to.length ?? 0}${slack ? `, Slack ${slack}` : ""})`);
   }
 }
 
@@ -183,14 +202,14 @@ export class PreviewNotifier implements HeldNotifier {
   }
 
   async held(approval: Approval): Promise<void> {
-    const alert: HeldAlert = composeHeldAlert(approval, this.baseUrl);
-    this.alerts.record({
-      approvalId: approval.id,
-      at: this.now(),
-      status: "preview",
-      email: null,
-      slack: null,
-      preview: { subject: alert.subject, text: alert.text },
-    });
+    this.preview(approval.id, composeHeldAlert(approval, this.baseUrl));
+  }
+
+  async unattributed(info: UnattributedInfo): Promise<void> {
+    this.preview(`webhook:${info.eventId}`, composeUnattributedAlert(info, this.baseUrl));
+  }
+
+  private preview(ref: string, alert: ComposedAlert): void {
+    this.alerts.record({ ref, at: this.now(), status: "preview", email: null, slack: null, preview: { subject: alert.subject, text: alert.text } });
   }
 }

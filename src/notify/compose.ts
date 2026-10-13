@@ -1,6 +1,6 @@
 import type { Approval } from "../approvals.js";
 import { toolLabel } from "../policy/describe.js";
-import { formatMoney } from "../policy/money.js";
+import { formatMoney, type Money } from "../policy/money.js";
 
 /**
  * The alert for a held call, in every format it's sent in. It says what the
@@ -9,8 +9,7 @@ import { formatMoney } from "../policy/money.js";
  * which needs a signed-in approver. No tokens, keys or agent-written text
  * (notes, reasons) go in it; identifiers are reduced to safe characters.
  */
-export interface HeldAlert {
-  approvalId: string;
+export interface ComposedAlert {
   subject: string;
   /** Plain text: the email's text part, and the in-app demo preview. */
   text: string;
@@ -34,8 +33,12 @@ const safeEmail = (v: string | null) => (v && /^[^\s@<>"]{1,64}@[A-Za-z0-9.-]{1,
 
 /** Who or what the call is about: the payer/recipient if known, else the PayPal object it targets. */
 export function customerOf(approval: Approval): string {
-  const email = safeEmail(approval.facts.payee);
+  const payer = approval.facts.verified?.payer;
+  const email = safeEmail(approval.facts.payee) ?? safeEmail(payer?.email ?? null);
   if (email) return email;
+  const name = payer?.name?.replace(/[^\p{L}\p{N} .'-]/gu, "").slice(0, 80).trim();
+  const card = payer?.card?.replace(/[^\w ]/g, "").slice(0, 40);
+  if (name || card) return [name, card && `(${card})`].filter(Boolean).join(" ");
   for (const [key, label] of ID_ARGS) {
     if (key in approval.args) {
       const id = safeId(approval.args[key]);
@@ -58,6 +61,8 @@ export function oneLine(summary: string): string {
 
 const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const escapeSlack = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+export type HeldAlert = ComposedAlert;
 
 export function composeHeldAlert(approval: Approval, baseUrl: string): HeldAlert {
   const what = `${toolLabel(approval.tool)}${approval.facts.amount ? ` of ${formatMoney(approval.facts.amount)}` : ""}`;
@@ -83,22 +88,64 @@ export function composeHeldAlert(approval: Approval, baseUrl: string): HeldAlert
   const signIn = "Sign in to Handrail to approve or reject it. Nothing can be approved from this message.";
 
   const subject = `Approval needed: ${what}`;
-  const text = [`A call was held for your approval.`, "", ...rows.map(([k, v]) => `${k}: ${v}`), "", `Review it: ${link}`, signIn].join("\n");
+  return render({ subject, intro: "A call was held for your approval.", rows, link, linkLabel: "Review in Handrail", footer: signIn });
+}
+
+/** A money-out action PayPal reported that no agent call through Handrail made. */
+export interface UnattributedInfo {
+  eventId: string;
+  eventType: string;
+  /** The tool it corresponds to, e.g. create_refund. */
+  tool: string | null;
+  resourceId: string | null;
+  amount: Money | null;
+  reason: string;
+  at: number;
+}
+
+const EVENT_WORDS: Record<string, string> = {
+  "PAYMENT.CAPTURE.REFUNDED": "A refund",
+  "CUSTOMER.DISPUTE.RESOLVED": "A dispute resolved in the buyer's favour",
+  "INVOICING.INVOICE.CANCELLED": "An invoice cancellation",
+  "BILLING.SUBSCRIPTION.CANCELLED": "A subscription cancellation",
+};
+
+export function composeUnattributedAlert(info: UnattributedInfo, baseUrl: string): ComposedAlert {
+  const what = `${EVENT_WORDS[info.eventType] ?? info.eventType}${info.amount ? ` of ${formatMoney(info.amount)}` : ""}`;
+  const id = safeId(info.resourceId);
+  const rows: Array<[string, string]> = [
+    ["PayPal reports", what],
+    ["PayPal id", id ?? "(not shown)"],
+    ["Sent through Handrail", "No. No agent call through Handrail made this."],
+    ["Why it matters", info.reason],
+    ["Reported", new Date(info.at).toUTCString()],
+  ];
+  return render({
+    subject: `Not sent through Handrail: ${what}`,
+    intro: "PayPal reported a money-out action that didn't go through Handrail. Something may be bypassing it.",
+    rows,
+    link: `${baseUrl.replace(/\/$/, "")}/app#activity`,
+    linkLabel: "See it in Handrail",
+    footer: "Check that no agent has its own PayPal credentials or a direct PayPal connection (Setup tab).",
+  });
+}
+
+function render(a: { subject: string; intro: string; rows: Array<[string, string]>; link: string; linkLabel: string; footer: string }): ComposedAlert {
+  const text = [a.intro, "", ...a.rows.map(([k, v]) => `${k}: ${v}`), "", `${a.linkLabel}: ${a.link}`, a.footer].join("\n");
   const html = [
-    `<p>A call was held for your approval.</p>`,
+    `<p>${escapeHtml(a.intro)}</p>`,
     `<table cellpadding="4" style="border-collapse:collapse">`,
-    ...rows.map(([k, v]) => `<tr><td style="color:#56605a;vertical-align:top">${escapeHtml(k)}</td><td><strong>${escapeHtml(v)}</strong></td></tr>`),
+    ...a.rows.map(([k, v]) => `<tr><td style="color:#56605a;vertical-align:top">${escapeHtml(k)}</td><td><strong>${escapeHtml(v)}</strong></td></tr>`),
     `</table>`,
-    `<p><a href="${escapeHtml(link)}" style="background:#127842;color:#ffffff;padding:10px 16px;border-radius:6px;text-decoration:none;display:inline-block">Review in Handrail</a></p>`,
-    `<p style="color:#56605a;font-size:13px">${escapeHtml(signIn)}</p>`,
+    `<p><a href="${escapeHtml(a.link)}" style="background:#127842;color:#ffffff;padding:10px 16px;border-radius:6px;text-decoration:none;display:inline-block">${escapeHtml(a.linkLabel)}</a></p>`,
+    `<p style="color:#56605a;font-size:13px">${escapeHtml(a.footer)}</p>`,
   ].join("\n");
-  const slackLines = rows.map(([k, v]) => `*${escapeSlack(k)}:* ${escapeSlack(v)}`).join("\n");
   const slack = {
-    text: subject,
+    text: a.subject,
     blocks: [
-      { type: "section", text: { type: "mrkdwn", text: `*${escapeSlack(subject)}*\n${slackLines}` } },
-      { type: "context", elements: [{ type: "mrkdwn", text: `<${link}|Review in Handrail> (sign-in required). ${escapeSlack(signIn.split(". ")[1] ?? "")}` }] },
+      { type: "section", text: { type: "mrkdwn", text: `*${escapeSlack(a.subject)}*\n${a.rows.map(([k, v]) => `*${escapeSlack(k)}:* ${escapeSlack(v)}`).join("\n")}` } },
+      { type: "context", elements: [{ type: "mrkdwn", text: `<${a.link}|${escapeSlack(a.linkLabel)}> (sign-in required). ${escapeSlack(a.footer)}` }] },
     ],
   };
-  return { approvalId: approval.id, subject, text, html, slack, link };
+  return { subject: a.subject, text, html, slack, link: a.link };
 }

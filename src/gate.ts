@@ -8,10 +8,10 @@ import { classifyOutcome, operationKey, type Operation, type OperationKey, type 
 import { log } from "./log.js";
 import { DIRECT_TOOLS, NoResponseError, type PayPalDirect } from "./paypal/direct.js";
 import type { PayPalRest } from "./paypal/rest.js";
-import { evaluate } from "./policy/engine.js";
+import { agentKey, evaluate, refundScope } from "./policy/engine.js";
 import { resolveFacts } from "./policy/facts.js";
 import { formatMoney } from "./policy/money.js";
-import { holdTtlMs, type CallFacts, type Evaluation, type Policy } from "./policy/types.js";
+import { holdTtlMs, type CallFacts, type Evaluation, type Policy, type RefundEntry } from "./policy/types.js";
 import { redactDeep } from "./redact.js";
 
 export const GET_APPROVAL_TOOL: Tool = {
@@ -114,7 +114,7 @@ export class Gate {
 
     const now = this.now();
     const previous = op ? this.deps.operations.get(op.key, now) : null;
-    let evaluation = this.evaluate(facts, now);
+    let evaluation = this.evaluate(facts, now, agent);
     if (previous?.status === "unknown" && !DIRECT_TOOLS.has(tool)) {
       evaluation = holdForUnknownOutcome(evaluation, tool);
     }
@@ -177,7 +177,7 @@ export class Gate {
 
     // Re-check with approval granted: limits may have been used up while it waited,
     // and an approval never overrides a block.
-    const evaluation = this.evaluate(approval.facts, now, true);
+    const evaluation = this.evaluate(approval.facts, now, approval.agent, true, id);
     if (evaluation.decision !== "allow") {
       const result = handrailResult({ status: "blocked", tool: approval.tool, reason: evaluation.reason, approval_id: id }, true);
       this.deps.approvals.complete(id, "blocked", result, this.now());
@@ -256,11 +256,30 @@ export class Gate {
     }
   }
 
-  private evaluate(facts: CallFacts, now: number, approved = false): Evaluation {
+  /**
+   * `skipApproval`: when re-checking an approval being executed, its own held
+   * entry mustn't count towards cumulative totals.
+   */
+  private evaluate(facts: CallFacts, now: number, agent: AgentIdentity | null, approved = false, skipApproval: string | null = null): Evaluation {
     const policy = this.deps.policy();
-    const longestWindow = Math.max(86400, ...policy.rules.map((r) => ("windowSeconds" in r ? r.windowSeconds : 0)));
+    const longestWindow = Math.max(86400, ...policy.rules.map((r) => ("windowSeconds" in r ? (r.windowSeconds ?? 0) : 0)));
     const history = this.deps.callLog.history(now - longestWindow * 1000);
-    return evaluate({ facts, policy, history, now, approved });
+    const needsRefunds = facts.tool === "create_refund" && policy.rules.some((r) => r.type === "cumulative_limit" && r.tools.includes(facts.tool));
+    const refunds = needsRefunds ? this.relatedRefunds(facts, agent, skipApproval) : [];
+    return evaluate({ facts, policy, history, now, approved, refunds, agent: agentKey(agent) });
+  }
+
+  /** Refunds sent on the same capture/order/payer/agent, plus held ones still waiting for a human. */
+  private relatedRefunds(facts: CallFacts, agent: AgentIdentity | null, skipApproval: string | null): RefundEntry[] {
+    const scope = refundScope(facts);
+    const key = agentKey(agent);
+    const sent = this.deps.callLog.sentRefunds({ ...scope, agent: key });
+    const held: RefundEntry[] = this.deps.approvals
+      .list("pending", 10_000)
+      .filter((a) => a.tool === "create_refund" && a.id !== skipApproval)
+      .map((a) => ({ at: a.createdAt, amount: a.facts.amount, state: "held" as const, ...refundScope(a.facts), agentKeyId: agentKey(a.agent) }))
+      .filter((r) => (scope.captureId && r.captureId === scope.captureId) || (scope.orderId && r.orderId === scope.orderId) || (scope.payer && r.payer === scope.payer) || (key && r.agentKeyId === key));
+    return [...sent, ...held];
   }
 
   private async forward(callId: number, tool: string, args: Record<string, unknown>, operation: Operation | null): Promise<CallToolResult> {

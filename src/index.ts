@@ -131,6 +131,7 @@ async function main(): Promise<void> {
     accounts,
     settings,
     email,
+    setup: { publicUrl: config.publicUrl, webhooksConfigured: !!config.paypalWebhookId },
     llm,
     demo,
     adminToken: config.adminToken,
@@ -157,6 +158,7 @@ async function main(): Promise<void> {
         callLog,
         store: webhooks,
         demo: demo && { routeWebhook: (ids) => demo.routeWebhook(ids) },
+        notifier: workspace.notifier,
         webhookId: config.paypalWebhookId,
         allowUnverified: config.allowUnverifiedWebhooks,
       });

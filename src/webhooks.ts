@@ -25,7 +25,10 @@ export interface ForwardedCall {
 /**
  * matched          the agent call that caused this event, with consistent details
  * mismatch         the agent call was found, but PayPal's details disagree with it
- * outside_handrail a merchant-only action (refund, invoice cancellation) with no agent call: something bypassed Handrail
+ * outside_handrail "Unattributed – not sent through Handrail": a money-out action (refund, dispute conceded,
+ *                  invoice or subscription cancelled) that PayPal reports but no agent call through Handrail made.
+ *                  Something may have bypassed Handrail (an agent with its own PayPal credentials or a direct
+ *                  toolkit connection). Flagged in the dashboard and alerted like a held call.
  * unrelated        no agent call, but this event is normal without one (e.g. a buyer paying)
  * ignored          an event type Handrail doesn't track
  */
@@ -48,7 +51,9 @@ interface EventRule {
   /** The amount PayPal reports, compared with the amount the agent call moved. */
   amount?(resource: Record<string, any>): Money | null;
   /** What it means when no agent call matches. */
-  whenUnmatched: "outside_handrail" | "unrelated";
+  whenUnmatched: "outside_handrail" | "unrelated" | ((resource: Record<string, any>) => "outside_handrail" | "unrelated");
+  /** Why an unattributed event matters, for the flag. Default: "no agent call through Handrail made it". */
+  unattributedReason?: (resource: Record<string, any>, id: string) => string;
 }
 
 const lastSegment = (href: unknown) => (typeof href === "string" ? href.split("/").pop() ?? null : null);
@@ -88,7 +93,11 @@ export const EVENT_RULES: Record<string, EventRule> = {
     tool: "accept_dispute_claim",
     resourceId: (r) => r.dispute_id ?? null,
     matches: (r, call) => call.args.dispute_id === r.dispute_id,
-    whenUnmatched: "unrelated",
+    // Resolved in the buyer's favour means money went back; a seller win doesn't need an agent call.
+    whenUnmatched: (r) => (r.dispute_outcome?.outcome_code === "RESOLVED_BUYER_FAVOUR" ? "outside_handrail" : "unrelated"),
+    unattributedReason: (_r, id) =>
+      `Dispute ${id} was resolved in the buyer's favour, and no agent call through Handrail accepted it. ` +
+      "Someone may have accepted the claim directly, or PayPal decided it.",
   },
   "CUSTOMER.DISPUTE.UPDATED": {
     tool: "accept_dispute_claim",
@@ -112,7 +121,9 @@ export const EVENT_RULES: Record<string, EventRule> = {
     tool: "cancel_subscription",
     resourceId: (r) => r.id ?? null,
     matches: (r, call) => call.args.subscription_id === r.id,
-    whenUnmatched: "unrelated",
+    whenUnmatched: "outside_handrail",
+    unattributedReason: (_r, id) =>
+      `Subscription ${id} was cancelled, and no agent call through Handrail cancelled it. The subscriber may have cancelled it themselves, or something bypassed Handrail.`,
   },
 };
 
@@ -128,11 +139,15 @@ export function matchEvent(event: WebhookEvent, calls: ForwardedCall[]): MatchRe
   const resourceId = rule.resourceId(resource);
   const call = calls.find((c) => c.tool === rule.tool && rule.matches(resource, c));
   if (!call) {
+    const status = typeof rule.whenUnmatched === "function" ? rule.whenUnmatched(resource) : rule.whenUnmatched;
     const reasons =
-      rule.whenUnmatched === "outside_handrail"
-        ? [`PayPal reports a ${event.event_type} (${resourceId ?? "unknown id"}) that no agent call through Handrail made`]
+      status === "outside_handrail"
+        ? [
+            rule.unattributedReason?.(resource, resourceId ?? "(unknown id)") ??
+              `PayPal reports a ${event.event_type} (${resourceId ?? "unknown id"}) that no agent call through Handrail made`,
+          ]
         : [];
-    return { status: rule.whenUnmatched, tool: rule.tool, callId: null, resourceId, reasons };
+    return { status, tool: rule.tool, callId: null, resourceId, reasons };
   }
 
   const reasons: string[] = [];
@@ -164,6 +179,17 @@ export function parseForwardedCall(row: CallRow): ForwardedCall {
     amount: row.amount_hundredths !== null && row.currency ? { hundredths: row.amount_hundredths, currency: row.currency } : null,
     outcome: row.outcome,
   };
+}
+
+export interface UnattributedEvent {
+  eventId: string;
+  receivedAt: string;
+  eventType: string;
+  tool: string | null;
+  resourceId: string | null;
+  amount: Money | null;
+  verified: boolean;
+  reasons: string[];
 }
 
 export interface StoredEvent {
@@ -241,6 +267,37 @@ export class WebhookStore {
         rawSha256: sha256(raw),
       };
       return { value: inserted, entries: inserted ? [{ kind: "webhook.received" as const, ref: `webhook:${event.id}`, data }] : [] };
+    });
+  }
+
+  /**
+   * Money-out actions PayPal reported that no agent call through Handrail
+   * made ("Unattributed – not sent through Handrail"), newest first.
+   */
+  unattributed(limit = 200): UnattributedEvent[] {
+    const rows = this.db
+      .prepare(
+        `SELECT event_id, received_at, event_type, resource_id, verified, tool, reasons_json, raw_json FROM webhook_events
+         WHERE status = 'outside_handrail' ORDER BY received_at DESC LIMIT ?`,
+      )
+      .all(limit) as Array<{ event_id: string; received_at: string; event_type: string; resource_id: string | null; verified: number; tool: string | null; reasons_json: string; raw_json: string }>;
+    return rows.map((r) => {
+      let amount: Money | null = null;
+      try {
+        amount = EVENT_RULES[r.event_type]?.amount?.((JSON.parse(r.raw_json) as WebhookEvent).resource ?? {}) ?? null;
+      } catch {
+        // Stored raw body that isn't JSON: no amount.
+      }
+      return {
+        eventId: r.event_id,
+        receivedAt: r.received_at,
+        eventType: r.event_type,
+        tool: r.tool,
+        resourceId: r.resource_id,
+        amount,
+        verified: r.verified === 1,
+        reasons: JSON.parse(r.reasons_json) as string[],
+      };
     });
   }
 
