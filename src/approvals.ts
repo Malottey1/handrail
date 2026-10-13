@@ -33,7 +33,7 @@ export interface Explanation {
   concerns: string[];
 }
 
-/** Who decided: a signed-in user, or a name from a script using the admin token. */
+/** Who decided: a signed-in user or "Admin script" (from the admin API), or a bare name (tests, internal callers). */
 export type Decider = string | { id: string; name: string };
 
 export interface Approval {
@@ -47,7 +47,7 @@ export interface Approval {
   status: ApprovalStatus;
   decidedAt: number | null;
   decidedBy: string | null;
-  /** The deciding user's id (null for decisions made through the admin token). */
+  /** The deciding user's id ("admin-script" for the admin token). */
   decidedById: string | null;
   /** The agent that made the call. */
   agent: AgentIdentity | null;

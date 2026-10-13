@@ -14,6 +14,7 @@ import { AuditChain } from "../src/audit-chain.js";
 import { CallLog } from "../src/audit.js";
 import { AccountStore } from "../src/auth/accounts.js";
 import { AgentKeyStore } from "../src/auth/agent-keys.js";
+import { checkAdminToken } from "../src/auth/http.js";
 import { hashPassword } from "../src/auth/passwords.js";
 import { Gate } from "../src/gate.js";
 import { OperationStore } from "../src/idempotency.js";
@@ -35,7 +36,7 @@ const PASSWORD = "correct horse battery";
 const servers: Server[] = [];
 after(() => servers.forEach((s) => s.close()));
 
-async function setup(opts: { demoAccess?: boolean; cookieSecure?: boolean | "auto" } = {}) {
+async function setup(opts: { demoAccess?: boolean; cookieSecure?: boolean | "auto"; adminToken?: string | undefined } = {}) {
   const db = new DatabaseSync(":memory:");
   const audit = new AuditChain(db);
   const callLog = new CallLog(db, audit);
@@ -82,7 +83,7 @@ async function setup(opts: { demoAccess?: boolean; cookieSecure?: boolean | "aut
     llm: null,
     accounts,
     agentKeys,
-    adminToken: ADMIN_TOKEN,
+    adminToken: "adminToken" in opts ? opts.adminToken : ADMIN_TOKEN,
     demoAccess: !!opts.demoAccess,
     trustProxy: false,
     cookieSecure: opts.cookieSecure ?? "auto",
@@ -354,17 +355,61 @@ describe("auth: every endpoint is enforced server-side", () => {
     assert.equal((await admin.req("PATCH", `/api/users/${vic.id}`, { disabled: true })).status, 200);
     assert.equal((await viewer.req("GET", "/api/summary")).status, 401, "disabling signs the user out");
   });
+});
 
-  it("still accepts the admin token for scripts", async () => {
-    const { base, heldRefund } = await setup();
-    const id = heldRefund().id;
-    const res = await fetch(`${base}/api/approvals/${id}/reject`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${ADMIN_TOKEN}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ by: "malcolm" }),
+describe("auth: the admin token", () => {
+  const withToken = (base: string, token: string, method: string, path: string, body?: unknown) =>
+    fetch(`${base}${path}`, {
+      method,
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
     });
+
+  it("is refused entirely when HANDRAIL_ADMIN_TOKEN is unset", async () => {
+    const { base, heldRefund, approvals, sent } = await setup({ adminToken: undefined });
+    const id = heldRefund().id;
+    for (const guess of ["", "undefined", "null", ADMIN_TOKEN]) {
+      assert.equal((await withToken(base, guess, "GET", "/api/summary")).status, 401, `bearer "${guess}"`);
+      assert.equal((await withToken(base, guess, "POST", `/api/approvals/${id}/approve`, {})).status, 401);
+    }
+    assert.equal(approvals.get(id)!.status, "pending");
+    assert.deepEqual(sent, []);
+  });
+
+  it("records everything done with it as \"Admin script\", never anonymously", async () => {
+    const { base, heldRefund, audit, policy } = await setup();
+    const rejected = heldRefund().id;
+    const res = await withToken(base, ADMIN_TOKEN, "POST", `/api/approvals/${rejected}/reject`, {});
     assert.equal(res.status, 200);
-    assert.equal((await res.json()).decidedBy, "malcolm (admin token)");
+    const body = await res.json();
+    assert.equal(body.decidedBy, "Admin script");
+    assert.equal(body.decidedById, "admin-script");
+    const decided = audit.list(20, `approval:${rejected}`).find((e) => e.kind === "approval.decided")!;
+    assert.equal(JSON.parse(decided.data_json).decidedBy, "Admin script");
+    assert.equal(JSON.parse(decided.data_json).decidedById, "admin-script");
+
+    // A script may label itself; the label is kept next to the name, not instead of it.
+    const labelled = heldRefund().id;
+    const res2 = await withToken(base, ADMIN_TOKEN, "POST", `/api/approvals/${labelled}/reject`, { by: "nightly cleanup" });
+    assert.equal((await res2.json()).decidedBy, "Admin script (nightly cleanup)");
+
+    assert.equal((await withToken(base, ADMIN_TOKEN, "PUT", "/api/policy", { policy: POLICY, baseHash: policy.hash() })).status, 200);
+    const changed = JSON.parse(audit.list(5).find((e) => e.kind === "policy.changed")!.data_json);
+    assert.equal(changed.by, "Admin script");
+    assert.equal(changed.byId, "admin-script");
+
+    const key = await withToken(base, ADMIN_TOKEN, "POST", "/api/agent-keys", { name: "Script bot" });
+    assert.equal(key.status, 201);
+    const created = JSON.parse(audit.list(5).find((e) => e.kind === "agent_key.created")!.data_json);
+    assert.deepEqual(created.by, { id: "admin-script", name: "Admin script" });
+    assert.equal(audit.verify().ok, true);
+  });
+
+  it("stops Handrail from starting on Render", () => {
+    assert.throws(() => checkAdminToken(ADMIN_TOKEN, { RENDER: "true" }), /must not be set on Render/);
+    assert.throws(() => checkAdminToken(ADMIN_TOKEN, { RENDER_SERVICE_ID: "srv-123" }), /must not be set on Render/);
+    assert.equal(checkAdminToken(undefined, { RENDER: "true" }), undefined);
+    assert.equal(checkAdminToken(ADMIN_TOKEN, {}), ADMIN_TOKEN);
   });
 });
 

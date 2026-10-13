@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { checkAdminToken } from "./auth/http.js";
 
 export interface Config {
   paypalClientId: string;
@@ -9,7 +10,7 @@ export interface Config {
   port: number;
   dbPath: string;
   policyPath: string;
-  /** Bearer token for the admin API. Unset disables it. */
+  /** Bearer token for scripts using the admin API. Unset (the default, and required on Render) refuses all bearer tokens. */
   adminToken: string | undefined;
   /** How long a held call waits inline for a human before returning "pending". */
   approvalWaitMs: number;
@@ -76,6 +77,8 @@ export function loadConfig(): Config {
     throw new Error(`PAYPAL_MCP_URL must be a sandbox URL or "local", got ${paypalMcpUrl}`);
   }
 
+  const adminToken = checkAdminToken(token("HANDRAIL_ADMIN_TOKEN"), process.env);
+
   return {
     paypalClientId: required("PAYPAL_CLIENT_ID"),
     paypalClientSecret: required("PAYPAL_CLIENT_SECRET"),
@@ -84,7 +87,7 @@ export function loadConfig(): Config {
     port: Number(process.env.PORT) || 8787,
     dbPath: process.env.HANDRAIL_DB_PATH?.trim() || "handrail.db",
     policyPath: process.env.HANDRAIL_POLICY_PATH?.trim() || "policy.json",
-    adminToken: token("HANDRAIL_ADMIN_TOKEN"),
+    adminToken,
     approvalWaitMs: positiveNumber("HANDRAIL_APPROVAL_WAIT_SECONDS", 20) * 1000,
     approvalTtlMs: positiveNumber("HANDRAIL_APPROVAL_TTL_MINUTES", 60) * 60 * 1000,
     idempotencyWindowMs: positiveNumber("HANDRAIL_IDEMPOTENCY_WINDOW_MINUTES", 60) * 60 * 1000,

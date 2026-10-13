@@ -11,6 +11,7 @@ import {
   authenticate,
   clearSessionCookie,
   clientIp,
+  ADMIN_SCRIPT,
   crossSite,
   csrfOk,
   setSessionCookie,
@@ -152,13 +153,16 @@ function match(route: Route, method: string, parts: string[]): string[] | null {
   return params;
 }
 
-/** Who to record as having acted: a signed-in user, or a named script using the admin token. */
-function actorOf(principal: Principal, body: Record<string, unknown>): { id: string; name: string } | string {
+/**
+ * Who to record as having acted: a signed-in user, or "Admin script" for the
+ * admin token. A script may add a label (`by`), kept alongside the name.
+ */
+function actorOf(principal: Principal, body: Record<string, unknown>): { id: string; name: string } {
   if (principal.kind === "session") return { id: principal.user.id, name: principal.user.name };
-  return `${text(body.by, 100) ?? "script"} (admin token)`;
+  const label = text(body.by, 100);
+  return { id: ADMIN_SCRIPT.id, name: label ? `${ADMIN_SCRIPT.name} (${label})` : ADMIN_SCRIPT.name };
 }
 
-const actorName = (a: { id: string; name: string } | string) => (typeof a === "string" ? a : a.name);
 const actorRef = (principal: Principal) => ({ id: principal.user.id, name: principal.user.name });
 
 /**
@@ -362,8 +366,8 @@ export function createAdminApi(deps: AdminDeps): (req: IncomingMessage, res: Ser
       const by = actorOf(principal, body);
       try {
         deps.policy.replace(body.policy, {
-          by: actorName(by),
-          byId: typeof by === "string" ? undefined : by.id,
+          by: by.name,
+          byId: by.id,
           source: text(body.source, 1000),
           baseHash: String(body.baseHash ?? ""),
           now: clock(),

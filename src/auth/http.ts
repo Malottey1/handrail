@@ -8,11 +8,27 @@ export const CSRF_HEADER = "x-csrf-token";
 /**
  * Who is making an /api request:
  * - session: a person signed in to the dashboard (cookie + CSRF token)
- * - token:   a script using HANDRAIL_ADMIN_TOKEN as a bearer token (acts as admin)
+ * - token:   a script using HANDRAIL_ADMIN_TOKEN as a bearer token (acts as admin,
+ *            recorded as ADMIN_SCRIPT). Refused outright when the variable is unset.
  */
 export type Principal =
   | { kind: "session"; user: User; csrf: string; token: string }
   | { kind: "token"; user: { id: string; name: string; role: Role } };
+
+/** The identity recorded for anything done with HANDRAIL_ADMIN_TOKEN: never anonymous. */
+export const ADMIN_SCRIPT = { id: "admin-script", name: "Admin script" } as const;
+
+/**
+ * The admin token is for local scripts only. A public deploy has accounts and
+ * roles; a shared bearer token there would be one leaked secret away from full
+ * admin, so Handrail refuses to start on Render with it set.
+ */
+export function checkAdminToken(token: string | undefined, env: Record<string, string | undefined>): string | undefined {
+  if (token && (env.RENDER || env.RENDER_SERVICE_ID)) {
+    throw new Error("HANDRAIL_ADMIN_TOKEN must not be set on Render. Remove it and sign in to the dashboard as an admin instead.");
+  }
+  return token;
+}
 
 export interface HttpOptions {
   adminToken: string | undefined;
@@ -75,12 +91,15 @@ export function clearSessionCookie(req: IncomingMessage, res: ServerResponse, op
   setSessionCookie(req, res, "", 0, opts);
 }
 
-/** The bearer admin token, or a valid session cookie. Null means unauthenticated. */
+/**
+ * The bearer admin token, or a valid session cookie. Null means unauthenticated.
+ * With HANDRAIL_ADMIN_TOKEN unset, every bearer token is refused.
+ */
 export function authenticate(req: IncomingMessage, accounts: AccountStore, opts: HttpOptions, now: number): Principal | null {
   const token = bearer(req);
   if (token !== null) {
     return opts.adminToken && safeEqual(token, opts.adminToken)
-      ? { kind: "token", user: { id: "admin-token", name: "Admin token", role: "admin" } }
+      ? { kind: "token", user: { ...ADMIN_SCRIPT, role: "admin" } }
       : null;
   }
   const sessionToken = cookies(req).get(SESSION_COOKIE);
