@@ -26,6 +26,12 @@ export interface Config {
   /** Anthropic API key for explanations and policy compilation. Unset disables the AI features; enforcement never needs it. */
   anthropicApiKey: string | undefined;
   aiModel: string;
+  /** Offer a "Try the demo" sign-in as a shared approver account (for hackathon judges). */
+  demoAccess: boolean;
+  /** Behind a proxy (e.g. Render): use X-Forwarded-For / X-Forwarded-Proto for client IP and HTTPS. */
+  trustProxy: boolean;
+  /** Secure flag on the session cookie. "auto": on unless the dashboard is on localhost over plain HTTP. */
+  cookieSecure: boolean | "auto";
 }
 
 function token(name: string): string | undefined {
@@ -49,6 +55,12 @@ function required(name: string): string {
     throw new Error(`Missing required env var ${name}. Copy .env.example to .env and fill it in.`);
   }
   return value;
+}
+
+function cookieSecure(raw: string | undefined): boolean | "auto" {
+  if (!raw || raw === "auto") return "auto";
+  if (raw === "true" || raw === "false") return raw === "true";
+  throw new Error(`HANDRAIL_COOKIE_SECURE must be true, false or auto, got ${raw}`);
 }
 
 export function loadConfig(): Config {
@@ -81,5 +93,8 @@ export function loadConfig(): Config {
     allowUnverifiedWebhooks: process.env.HANDRAIL_WEBHOOK_ALLOW_UNVERIFIED?.trim() === "true",
     anthropicApiKey: process.env.ANTHROPIC_API_KEY?.trim() || undefined,
     aiModel: process.env.HANDRAIL_AI_MODEL?.trim() || "claude-opus-5-5",
+    demoAccess: process.env.HANDRAIL_DEMO_ACCESS?.trim() === "true",
+    trustProxy: process.env.HANDRAIL_TRUST_PROXY?.trim() === "true",
+    cookieSecure: cookieSecure(process.env.HANDRAIL_COOKIE_SECURE?.trim()),
   };
 }

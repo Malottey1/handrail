@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { AuditChain } from "./audit-chain.js";
+import type { AgentIdentity } from "./auth/agent-keys.js";
 import type { CallFacts, Evaluation } from "./policy/types.js";
 
 /**
@@ -32,6 +33,9 @@ export interface Explanation {
   concerns: string[];
 }
 
+/** Who decided: a signed-in user, or a name from a script using the admin token. */
+export type Decider = string | { id: string; name: string };
+
 export interface Approval {
   id: string;
   createdAt: number;
@@ -43,6 +47,10 @@ export interface Approval {
   status: ApprovalStatus;
   decidedAt: number | null;
   decidedBy: string | null;
+  /** The deciding user's id (null for decisions made through the admin token). */
+  decidedById: string | null;
+  /** The agent that made the call. */
+  agent: AgentIdentity | null;
   note: string | null;
   result: unknown;
   /** Advisory text for the reviewer. Never consulted by the gate. */
@@ -61,6 +69,8 @@ interface ApprovalRow {
   status: ApprovalStatus;
   decided_at: number | null;
   decided_by: string | null;
+  decided_by_id: string | null;
+  agent_json: string | null;
   note: string | null;
   result_json: string | null;
   explanation_json: string | null;
@@ -91,7 +101,7 @@ export class ApprovalStore {
       CREATE INDEX IF NOT EXISTS approvals_status ON approvals (status, expires_at);
     `);
     const existing = new Set((db.prepare(`PRAGMA table_info(approvals)`).all() as Array<{ name: string }>).map((c) => c.name));
-    for (const column of ["explanation_json", "explanation_status", "explanation_model"]) {
+    for (const column of ["explanation_json", "explanation_status", "explanation_model", "decided_by_id", "agent_json"]) {
       if (!existing.has(column)) db.exec(`ALTER TABLE approvals ADD COLUMN ${column} TEXT`);
     }
   }
@@ -113,16 +123,16 @@ export class ApprovalStore {
     });
   }
 
-  create(facts: CallFacts, evaluation: Evaluation, now: number, ttlMs: number): Approval {
+  create(facts: CallFacts, evaluation: Evaluation, now: number, ttlMs: number, agent: AgentIdentity | null = null): Approval {
     const id = `apr_${randomUUID().replaceAll("-", "").slice(0, 20)}`;
     this.chain.record(now, () => {
       this.db
         .prepare(
-          `INSERT INTO approvals (id, created_at, expires_at, tool, facts_json, evaluation_json, status)
-           VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
+          `INSERT INTO approvals (id, created_at, expires_at, tool, facts_json, evaluation_json, status, agent_json)
+           VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`,
         )
-        .run(id, now, now + ttlMs, facts.tool, JSON.stringify(facts), JSON.stringify(evaluation));
-      const data = { tool: facts.tool, facts, evaluation, status: "pending", expiresAt: new Date(now + ttlMs).toISOString() };
+        .run(id, now, now + ttlMs, facts.tool, JSON.stringify(facts), JSON.stringify(evaluation), agent ? JSON.stringify(agent) : null);
+      const data = { tool: facts.tool, facts, evaluation, status: "pending", expiresAt: new Date(now + ttlMs).toISOString(), agent };
       return { value: undefined, entries: [{ kind: "approval.created" as const, ref: `approval:${id}`, data }] };
     });
     return this.get(id)!;
@@ -145,16 +155,18 @@ export class ApprovalStore {
    * Returns false if it wasn't pending (already decided, or expired), so two
    * clicks on Approve can never execute a call twice.
    */
-  decide(id: string, to: "executing" | "rejected", by: string, note: string | null, now: number): boolean {
+  decide(id: string, to: "executing" | "rejected", by: Decider, note: string | null, now: number): boolean {
+    const name = typeof by === "string" ? by : by.name;
+    const userId = typeof by === "string" ? null : by.id;
     return this.chain.record(now, () => {
       const changed =
         this.db
           .prepare(
-            `UPDATE approvals SET status = ?, decided_at = ?, decided_by = ?, note = ?
+            `UPDATE approvals SET status = ?, decided_at = ?, decided_by = ?, decided_by_id = ?, note = ?
              WHERE id = ? AND status = 'pending' AND expires_at > ?`,
           )
-          .run(to, now, by, note, id, now).changes === 1;
-      const data = { status: to, decidedBy: by, note, decision: to === "executing" ? "approved" : "rejected" };
+          .run(to, now, name, userId, note, id, now).changes === 1;
+      const data = { status: to, decidedBy: name, decidedById: userId, note, decision: to === "executing" ? "approved" : "rejected" };
       return { value: changed, entries: changed ? [{ kind: "approval.decided" as const, ref: `approval:${id}`, data }] : [] };
     });
   }
@@ -197,6 +209,8 @@ function fromRow(row: ApprovalRow): Approval {
     status: row.status,
     decidedAt: row.decided_at,
     decidedBy: row.decided_by,
+    decidedById: row.decided_by_id,
+    agent: row.agent_json ? (JSON.parse(row.agent_json) as AgentIdentity) : null,
     note: row.note,
     result: row.result_json ? JSON.parse(row.result_json) : null,
     explanation: row.explanation_json ? (JSON.parse(row.explanation_json) as Explanation) : null,

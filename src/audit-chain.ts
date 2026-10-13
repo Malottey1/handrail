@@ -14,6 +14,12 @@ import { canonicalJson } from "./idempotency.js";
  * webhook.received   a PayPal event and what it was matched to
  * policy.loaded      the policy in force at startup (when it differs from the last one recorded)
  * policy.changed     a human changed the policy from the dashboard
+ * user.created       an account was created (first admin, by invite, or the demo account)
+ * user.updated       a profile, password (never the hash), role or access change
+ * invite.created     an admin invited someone, with a role
+ * invite.revoked     an admin cancelled an unused invite
+ * agent_key.created  an admin created an agent API key (its prefix, never the key)
+ * agent_key.revoked  an admin revoked an agent key
  */
 export type AuditKind =
   | "chain.started"
@@ -27,7 +33,13 @@ export type AuditKind =
   | "approval.explained"
   | "webhook.received"
   | "policy.loaded"
-  | "policy.changed";
+  | "policy.changed"
+  | "user.created"
+  | "user.updated"
+  | "invite.created"
+  | "invite.revoked"
+  | "agent_key.created"
+  | "agent_key.revoked";
 
 export interface AuditEntry {
   kind: AuditKind;
@@ -233,6 +245,7 @@ function checkWorkingTables(db: DatabaseSync, rows: AuditRow[]): VerifyResult["p
         ["forwarded", Boolean(row.forwarded) === want.forwarded],
         ["outcome", (row.outcome ?? null) === (want.outcome ?? null)],
         ["result", same(parse(row.result_json), want.result)],
+        ["agent", same(row.agent_name ? { keyId: row.agent_key_id ?? null, name: row.agent_name } : null, want.agent)],
       ];
       for (const [field, ok] of checks) if (!ok) flag(ref, `tool_calls ${field} differs from the audit log`);
     }
@@ -251,6 +264,8 @@ function checkWorkingTables(db: DatabaseSync, rows: AuditRow[]): VerifyResult["p
         ["facts", same(parse(row.facts_json), want.facts)],
         ["status", row.status === want.status],
         ["decided_by", (row.decided_by ?? null) === (want.decidedBy ?? null)],
+        ["decided_by_id", (row.decided_by_id ?? null) === (want.decidedById ?? null)],
+        ["agent", same(parse(row.agent_json ?? null), want.agent)],
         ["note", (row.note ?? null) === (want.note ?? null)],
         ["result", same(parse(row.result_json), want.result)],
         ["explanation", !("explanation" in want) || same(parse(row.explanation_json), want.explanation)],

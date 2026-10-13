@@ -75,7 +75,13 @@ describe("audit chain", () => {
   it("records who approved and why", () => {
     const { audit, approvalId } = populated();
     const decided = audit.list(10, `approval:${approvalId}`).find((e) => e.kind === "approval.decided")!;
-    assert.deepEqual(JSON.parse(decided.data_json), { decidedBy: "alice", decision: "approved", note: "customer called", status: "executing" });
+    assert.deepEqual(JSON.parse(decided.data_json), {
+      decidedBy: "alice",
+      decidedById: null,
+      decision: "approved",
+      note: "customer called",
+      status: "executing",
+    });
   });
 
   it("refuses to update or delete entries", () => {

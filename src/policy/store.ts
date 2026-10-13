@@ -73,7 +73,8 @@ export class PolicyStore {
    * Replaces the policy. `baseHash` is the hash the editor started from, so
    * two people editing at once can't silently overwrite each other.
    */
-  replace(input: unknown, opts: { by: string; baseHash: string; source: string | null; now: number }): Policy {
+  /** `byId` is the signed-in user's id, when the change came from the dashboard. */
+  replace(input: unknown, opts: { by: string; byId?: string; baseHash: string; source: string | null; now: number }): Policy {
     if (opts.baseHash !== this.hash()) {
       throw new PolicyConflictError("The policy changed since you loaded it. Reload and try again.");
     }
@@ -94,6 +95,7 @@ export class PolicyStore {
         ref: "policy",
         data: {
           by: opts.by,
+          ...(opts.byId ? { byId: opts.byId } : {}),
           source: opts.source,
           added: [...after.keys()].filter((id) => !before.has(id)),
           removed: [...before.keys()].filter((id) => !after.has(id)),

@@ -7,6 +7,7 @@ import {
   ListToolsRequestSchema,
   ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import type { AgentIdentity } from "./auth/agent-keys.js";
 import { GET_APPROVAL_TOOL, type Gate } from "./gate.js";
 import { IDEMPOTENCY_ARG } from "./idempotency.js";
 import { classifyTool } from "./policy/classify.js";
@@ -28,7 +29,8 @@ export const SERVER_INFO = { name: "handrail", version: "0.1.0" };
  * optional idempotency_key on every non-read tool and handrail_get_approval
  * (see src/tool-parity.ts). Every tool call goes through the gate.
  */
-export function createProxyServer(upstream: Client, gate: Gate): Server {
+/** `agent` is who is connected (an agent key, or the local stdio agent), recorded on every call. */
+export function createProxyServer(upstream: Client, gate: Gate, agent: AgentIdentity | null = null): Server {
   const upstreamCaps = upstream.getServerCapabilities() ?? {};
   const server = new Server(SERVER_INFO, {
     capabilities: {
@@ -49,7 +51,7 @@ export function createProxyServer(upstream: Client, gate: Gate): Server {
   });
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    return gate.handle(request.params.name, request.params.arguments ?? {});
+    return gate.handle(request.params.name, request.params.arguments ?? {}, agent);
   });
 
   // Read-only, so passed straight through.

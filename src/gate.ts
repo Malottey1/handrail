@@ -1,7 +1,8 @@
 import { EventEmitter } from "node:events";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
-import { FINAL_STATUSES, type Approval, type ApprovalStore } from "./approvals.js";
+import { FINAL_STATUSES, type Approval, type ApprovalStore, type Decider } from "./approvals.js";
+import type { AgentIdentity } from "./auth/agent-keys.js";
 import type { CallLog } from "./audit.js";
 import { classifyOutcome, operationKey, type Operation, type OperationKey, type OperationStore } from "./idempotency.js";
 import { log } from "./log.js";
@@ -83,14 +84,15 @@ export class Gate {
     setInterval(() => this.expireOverdue(), 30_000).unref();
   }
 
-  async handle(tool: string, rawArgs: Record<string, unknown>): Promise<CallToolResult> {
+  /** `agent` is who made the call (an agent key, or the local stdio agent); it's recorded, never trusted for decisions. */
+  async handle(tool: string, rawArgs: Record<string, unknown>, agent: AgentIdentity | null = null): Promise<CallToolResult> {
     if (tool === GET_APPROVAL_TOOL.name) return this.getApprovalTool(rawArgs);
 
     const op = operationKey(tool, rawArgs);
     const args = op?.args ?? rawArgs;
 
     // Cheap check first, so a retry storm doesn't trigger a fact lookup per call.
-    const early = op && this.duplicate(op, tool);
+    const early = op && this.duplicate(op, tool, agent);
     if (early) return early;
 
     const facts = await resolveFacts(tool, args, this.deps.rest);
@@ -98,7 +100,7 @@ export class Gate {
     // From here to forwarding there is no await: the duplicate check, policy
     // evaluation and the records it creates happen atomically, so concurrent
     // calls can neither both run nor both slip under a limit.
-    const late = op && this.duplicate(op, tool);
+    const late = op && this.duplicate(op, tool, agent);
     if (late) return late;
 
     const now = this.now();
@@ -110,7 +112,7 @@ export class Gate {
 
     const approval =
       evaluation.decision === "require_approval"
-        ? this.deps.approvals.create(facts, evaluation, now, this.options.approvalTtlMs)
+        ? this.deps.approvals.create(facts, evaluation, now, this.options.approvalTtlMs, agent)
         : null;
     const operation =
       op && evaluation.decision !== "block"
@@ -121,6 +123,7 @@ export class Gate {
       approvalId: approval?.id,
       operationKey: op?.key,
       requestId: operation && DIRECT_TOOLS.has(tool) ? operation.requestId : undefined,
+      agent,
       now,
     });
     if (approval) this.notifyHeld(approval);
@@ -152,8 +155,9 @@ export class Gate {
   }
 
   /** Approves a held call and forwards it to PayPal exactly once. */
-  async approve(id: string, by: string, note: string | null): Promise<Approval> {
+  async approve(id: string, by: Decider, note: string | null): Promise<Approval> {
     this.expireOverdue();
+    const byName = typeof by === "string" ? by : by.name;
     const now = this.now();
     if (!this.deps.approvals.decide(id, "executing", by, note, now)) {
       throw this.notPending(id);
@@ -169,7 +173,7 @@ export class Gate {
       const result = handrailResult({ status: "blocked", tool: approval.tool, reason: evaluation.reason, approval_id: id }, true);
       this.deps.approvals.complete(id, "blocked", result, this.now());
       if (operation) this.finishOperation(operation, "abandoned", result);
-      log(`${approval.tool} approval ${id} by ${by} -> blocked at execution: ${evaluation.reason}`);
+      log(`${approval.tool} approval ${id} by ${byName} -> blocked at execution: ${evaluation.reason}`);
       return this.settle(id);
     }
 
@@ -179,22 +183,23 @@ export class Gate {
       approvalId: id,
       operationKey: operation?.key,
       requestId: operation && DIRECT_TOOLS.has(approval.tool) ? operation.requestId : undefined,
+      agent: approval.agent,
       now,
     });
-    log(`${approval.tool} approval ${id} approved by ${by}; forwarding`);
+    log(`${approval.tool} approval ${id} approved by ${byName}; forwarding`);
     const result = await this.forward(callId, approval.tool, approval.args, operation);
     this.deps.approvals.complete(id, classifyOutcome(result, false) === "succeeded" ? "executed" : "failed", result, this.now());
     return this.settle(id);
   }
 
-  reject(id: string, by: string, note: string | null): Approval {
+  reject(id: string, by: Decider, note: string | null): Approval {
     this.expireOverdue();
     if (!this.deps.approvals.decide(id, "rejected", by, note, this.now())) {
       throw this.notPending(id);
     }
     const operation = this.deps.operations.byApproval(id);
     if (operation) this.finishOperation(operation, "rejected");
-    log(`approval ${id} rejected by ${by}${note ? `: ${note}` : ""}`);
+    log(`approval ${id} rejected by ${typeof by === "string" ? by : by.name}${note ? `: ${note}` : ""}`);
     return this.settle(id);
   }
 
@@ -213,14 +218,14 @@ export class Gate {
    * and returns the answer; otherwise returns null and the call proceeds.
    * Failed, unknown and abandoned operations proceed as a new attempt.
    */
-  private duplicate(op: OperationKey, tool: string): Promise<CallToolResult> | null {
+  private duplicate(op: OperationKey, tool: string, agent: AgentIdentity | null): Promise<CallToolResult> | null {
     this.expireOverdue(); // an expired approval frees its operation for a new attempt
     const now = this.now();
     const existing = this.deps.operations.get(op.key, now);
     if (!existing) return null;
 
     const record = () => {
-      this.deps.callLog.recordDuplicate(tool, op.args, op.key, now);
+      this.deps.callLog.recordDuplicate(tool, op.args, op.key, now, agent);
       log(`${tool} -> duplicate of operation started ${new Date(existing.createdAt).toISOString()} (${existing.status}); not sent again`);
     };
 

@@ -1,11 +1,13 @@
-import { createServer, type IncomingMessage } from "node:http";
+import { createServer } from "node:http";
 import { DatabaseSync } from "node:sqlite";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { authorized, handleAdmin } from "./admin-api.js";
+import { createAdminApi, demoPassword } from "./admin-api.js";
 import { ApprovalStore } from "./approvals.js";
 import { AuditChain } from "./audit-chain.js";
 import { CallLog } from "./audit.js";
+import { AccountStore } from "./auth/accounts.js";
+import { AgentKeyStore, STDIO_AGENT } from "./auth/agent-keys.js";
+import { hashPassword } from "./auth/passwords.js";
 import { loadConfig } from "./config.js";
 import { Gate } from "./gate.js";
 import { OperationStore } from "./idempotency.js";
@@ -18,17 +20,11 @@ import { AnthropicLlm } from "./ai/llm.js";
 import { Explainer } from "./ai/explain.js";
 import { loadPolicyFile } from "./policy/load.js";
 import { PolicyStore } from "./policy/store.js";
+import { handleMcp } from "./mcp-endpoint.js";
 import { createProxyServer } from "./proxy.js";
 import { serveDashboard } from "./static.js";
 import { handleWebhook } from "./webhook-endpoint.js";
 import { WebhookStore } from "./webhooks.js";
-
-async function readJson(req: IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(chunk as Buffer);
-  const raw = Buffer.concat(chunks).toString("utf8");
-  return raw ? JSON.parse(raw) : undefined;
-}
 
 /** The built React dashboard (npm run build:web). */
 const DASHBOARD_DIR = process.env.HANDRAIL_DASHBOARD_DIR?.trim() || "web/dist";
@@ -53,7 +49,13 @@ async function main(): Promise<void> {
   const webhooks = new WebhookStore(db, audit);
   const approvals = new ApprovalStore(db, audit);
   const operations = new OperationStore(db, config.idempotencyWindowMs);
+  const accounts = new AccountStore(db, audit);
+  const agentKeys = new AgentKeyStore(db, audit);
   audit.start(Date.now());
+  if (config.demoAccess) {
+    const demo = accounts.ensureDemoUser(await hashPassword(demoPassword()), Date.now());
+    log(`Demo access on: "Try the demo" signs in as ${demo.name} (approver)`);
+  }
   const policyStore = new PolicyStore(config.policyPath, audit, policy);
   policyStore.recordLoaded(Date.now());
 
@@ -75,6 +77,21 @@ async function main(): Promise<void> {
     },
     { approvalWaitMs: config.approvalWaitMs, approvalTtlMs: config.approvalTtlMs },
   );
+
+  const adminApi = createAdminApi({
+    gate,
+    callLog,
+    webhooks,
+    audit,
+    policy: policyStore,
+    llm,
+    accounts,
+    agentKeys,
+    adminToken: config.adminToken,
+    demoAccess: config.demoAccess,
+    trustProxy: config.trustProxy,
+    cookieSecure: config.cookieSecure,
+  });
 
   const { tools } = await upstream.listTools();
   log(`Upstream exposes ${tools.length} tools`);
@@ -99,7 +116,7 @@ async function main(): Promise<void> {
       });
       return;
     }
-    if (await handleAdmin(req, res, { gate, callLog, webhooks, audit, policy: policyStore, llm, adminToken: config.adminToken })) {
+    if (await adminApi(req, res)) {
       return;
     }
     if (path !== "/mcp" && (await serveDashboard(req, res, DASHBOARD_DIR))) {
@@ -109,39 +126,7 @@ async function main(): Promise<void> {
       res.writeHead(404).end();
       return;
     }
-    if (req.method !== "POST") {
-      res.writeHead(405, { Allow: "POST" }).end();
-      return;
-    }
-    // /mcp can move money, so it needs the agent token, even on localhost:
-    // a tunnel (e.g. for webhooks) would otherwise expose it.
-    if (!config.agentToken) {
-      res.writeHead(503, { "Content-Type": "application/json" }).end('{"error":"HTTP MCP disabled: set HANDRAIL_AGENT_TOKEN in .env"}');
-      return;
-    }
-    if (!authorized(req, config.agentToken)) {
-      res.writeHead(401, { "Content-Type": "application/json" }).end('{"error":"Missing or wrong agent token"}');
-      return;
-    }
-
-    try {
-      const body = await readJson(req);
-      const server = createProxyServer(upstream, gate);
-      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
-      res.on("close", () => {
-        void transport.close();
-        void server.close();
-      });
-      await server.connect(transport);
-      await transport.handleRequest(req, res, body);
-    } catch (err) {
-      log("Request failed:", (err as Error).message);
-      if (!res.headersSent) {
-        res.writeHead(400, { "Content-Type": "application/json" }).end(
-          JSON.stringify({ jsonrpc: "2.0", error: { code: -32700, message: "Bad request" }, id: null }),
-        );
-      }
-    }
+    await handleMcp(req, res, { upstream, gate, agentKeys, agentToken: config.agentToken });
   });
 
   http.on("error", (err: NodeJS.ErrnoException) => {
@@ -156,15 +141,16 @@ async function main(): Promise<void> {
   });
 
   http.listen(config.port, host, () => {
-    log(`Dashboard at http://${host}:${config.port}/${config.adminToken ? "" : " (needs HANDRAIL_ADMIN_TOKEN)"}`);
-    log(`Admin API at http://${host}:${config.port}/api${config.adminToken ? "" : " (disabled: set HANDRAIL_ADMIN_TOKEN)"}`);
-    if (!stdio) log(`MCP at http://${host}:${config.port}/mcp${config.agentToken ? "" : " (disabled: set HANDRAIL_AGENT_TOKEN)"}`);
+    log(`Dashboard at http://${host}:${config.port}/${accounts.countUsers() === 0 ? " (no accounts yet: the first sign-up becomes admin)" : ""}`);
+    log(`Admin API at http://${host}:${config.port}/api (dashboard sessions${config.adminToken ? " or HANDRAIL_ADMIN_TOKEN" : ""})`);
+    if (!stdio) log(`MCP at http://${host}:${config.port}/mcp (agent keys from the dashboard${config.agentToken ? " or HANDRAIL_AGENT_TOKEN" : ""})`);
     log(`PayPal webhooks at http://${host}:${config.port}/webhooks/paypal${config.paypalWebhookId ? "" : " (disabled: set PAYPAL_WEBHOOK_ID)"}`);
     if (config.allowUnverifiedWebhooks) log("WARNING: accepting unverified webhook events (HANDRAIL_WEBHOOK_ALLOW_UNVERIFIED=true)");
   });
 
   if (stdio) {
-    await createProxyServer(upstream, gate).connect(new StdioServerTransport());
+    // A stdio agent started Handrail itself, with access to .env; it's recorded as the local agent.
+    await createProxyServer(upstream, gate, STDIO_AGENT).connect(new StdioServerTransport());
     log("Serving MCP over stdio");
   }
 }

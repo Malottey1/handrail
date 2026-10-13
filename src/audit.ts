@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { AuditChain } from "./audit-chain.js";
+import type { AgentIdentity } from "./auth/agent-keys.js";
 import type { Outcome } from "./idempotency.js";
 import type { CallFacts, Evaluation, HistoryEntry } from "./policy/types.js";
 
@@ -25,6 +26,8 @@ export interface CallRow {
   operation_key: string | null;
   request_id: string | null;
   outcome: CallOutcome | null;
+  agent_key_id: string | null;
+  agent_name: string | null;
 }
 
 /**
@@ -60,7 +63,7 @@ export class CallLog {
       );
       CREATE INDEX IF NOT EXISTS tool_calls_history ON tool_calls (forwarded, at_ms);
     `);
-    addColumns(db, { operation_key: "TEXT", request_id: "TEXT", outcome: "TEXT" });
+    addColumns(db, { operation_key: "TEXT", request_id: "TEXT", outcome: "TEXT", agent_key_id: "TEXT", agent_name: "TEXT" });
   }
 
   /**
@@ -71,14 +74,14 @@ export class CallLog {
   begin(
     facts: CallFacts,
     evaluation: Evaluation,
-    opts: { forwarded: boolean; approvalId?: string; operationKey?: string; requestId?: string; now: number },
+    opts: { forwarded: boolean; approvalId?: string; operationKey?: string; requestId?: string; agent?: AgentIdentity | null; now: number },
   ): number {
     return this.chain.record(opts.now, () => {
       const result = this.db
         .prepare(
           `INSERT INTO tool_calls (created_at, at_ms, tool, args_json, decision, reason, hits_json,
-             amount_hundredths, currency, amount_source, forwarded, approval_id, operation_key, request_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             amount_hundredths, currency, amount_source, forwarded, approval_id, operation_key, request_id, agent_key_id, agent_name)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           new Date(opts.now).toISOString(),
@@ -95,6 +98,8 @@ export class CallLog {
           opts.approvalId ?? null,
           opts.operationKey ?? null,
           opts.requestId ?? null,
+          opts.agent?.keyId ?? null,
+          opts.agent?.name ?? null,
         );
       const id = Number(result.lastInsertRowid);
       const entry = {
@@ -113,6 +118,7 @@ export class CallLog {
           approvalId: opts.approvalId ?? null,
           operationKey: opts.operationKey ?? null,
           requestId: opts.requestId ?? null,
+          agent: opts.agent ?? null,
         },
       };
       return { value: id, entries: [entry] };
@@ -120,17 +126,17 @@ export class CallLog {
   }
 
   /** Records a repeat of a live operation that was answered without contacting PayPal. */
-  recordDuplicate(tool: string, args: Record<string, unknown>, operationKey: string, now: number): number {
+  recordDuplicate(tool: string, args: Record<string, unknown>, operationKey: string, now: number, agent: AgentIdentity | null = null): number {
     return this.chain.record(now, () => {
       const result = this.db
         .prepare(
           `INSERT INTO tool_calls (created_at, at_ms, tool, args_json, decision, reason, hits_json,
-             amount_source, forwarded, operation_key, outcome, is_error, duration_ms)
-           VALUES (?, ?, ?, ?, 'duplicate', 'Repeat of an earlier identical call; not sent to PayPal again', '[]', 'none', 0, ?, 'duplicate', 0, 0)`,
+             amount_source, forwarded, operation_key, outcome, is_error, duration_ms, agent_key_id, agent_name)
+           VALUES (?, ?, ?, ?, 'duplicate', 'Repeat of an earlier identical call; not sent to PayPal again', '[]', 'none', 0, ?, 'duplicate', 0, 0, ?, ?)`,
         )
-        .run(new Date(now).toISOString(), now, tool, JSON.stringify(args), operationKey);
+        .run(new Date(now).toISOString(), now, tool, JSON.stringify(args), operationKey, agent?.keyId ?? null, agent?.name ?? null);
       const id = Number(result.lastInsertRowid);
-      const data = { tool, args, decision: "duplicate", amount: null, forwarded: false, operationKey, outcome: "duplicate" };
+      const data = { tool, args, decision: "duplicate", amount: null, forwarded: false, operationKey, outcome: "duplicate", agent };
       return { value: id, entries: [{ kind: "call.duplicate" as const, ref: `call:${id}`, data }] };
     });
   }
