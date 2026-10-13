@@ -15,6 +15,8 @@ Then click **Run demo agent** on the Approvals tab. A scripted support agent con
 3. The agent refunds an amount over the limit. Handrail holds it and an AI brief appears on the approval card. Approve or reject it.
 4. The agent retries that refund. Handrail recognises it as the same request: nothing is sent again and no second approval appears.
 
+Each held call also shows an **alert preview**: the email approvers would get. The demo never sends real emails or Slack messages.
+
 The amounts come from the policy in force. Each step shows what actually happened, read from the call log. The Activity, Webhooks and Audit log tabs show the full record.
 
 **Each "Try the demo" sign-in gets its own workspace.** That's a separate in-memory database with its own call log, approvals, audit chain, webhooks and "Demo agent" key, and a copy of the policy. Several people can use the demo at once without seeing or deciding each other's calls, and their runs don't use up each other's rate or spend limits. Nothing done in the demo touches real data, and real users never see demo activity. PayPal's webhooks for demo sales are routed to the workspace that made them, and dropped once it's gone. A workspace is cleared after 2 hours without use. The demo agent runs at most once a minute per session, 10 times an hour per address and 60 times an hour in total.
@@ -49,7 +51,8 @@ flowchart LR
 | Part | What it does |
 | --- | --- |
 | **Policy engine** (`src/policy/`) | Rules in `policy.json` decide *allow*, *needs approval* or *block* for each call: per-call amount ceilings, rolling spend limits, rate limits, payee allowlists and always-on tool rules. The strictest matching rule wins, and a human can never approve past a block. If a call carries no amount (a full refund, a capture, accepting a dispute), Handrail looks it up through read-only PayPal APIs. If it still can't tell the amount or payee, the call is held rather than guessed. |
-| **Approval queue** (`src/approvals.ts`) | A held call waits about 20 seconds for a decision. If nobody decides in that time, the agent gets a structured "pending" answer and can check back with `handrail_get_approval`. Rejections and blocks come back as structured denials telling the agent not to retry. |
+| **Approval queue** (`src/approvals.ts`) | A held call waits about 20 seconds for a decision. If nobody decides in that time, the agent gets a structured "pending" answer and can check back with `handrail_get_approval`. Rejections and blocks come back as structured denials telling the agent not to retry. A held call expires after 24 hours by default (`approvals.expireAfterHours` in the policy): it's never sent to PayPal, the agent is told, and the log records it. |
+| **Alerts** (`src/notify/`) | When a call is held, approvers get an email (via Brevo) and, if an admin set one, a Slack message. It says what the agent wants, the customer, the rule that held it and the AI's one-line summary, and links to the call in the dashboard. Deciding needs a sign-in: there's no approve button in the message, and no token or agent-written text in it. |
 | **Idempotency** (`src/idempotency.ts`) | Every money call maps to one *operation*: the agent's `idempotency_key`, or a hash of the tool and its arguments within an hour. Repeats are answered from the record without contacting PayPal. `create_refund` and `pay_order` go straight to PayPal's REST API with a per-operation `PayPal-Request-Id`, so even a retry after a timeout can't duplicate the payment. |
 | **Audit log** (`src/audit-chain.ts`) | Every decision, approval, result, webhook and policy change is an entry whose SHA-256 hash covers the previous one. It is written in the same SQLite transaction as the change it describes. Database triggers reject edits, and `verify()` recomputes the chain and replays it against the working tables, so editing either is detected. |
 | **Webhooks** (`src/webhooks.ts`) | `POST /webhooks/paypal` verifies PayPal's signature and matches each event to the agent call that caused it. Mismatched amounts, and refunds or cancellations that no agent call explains, are flagged. |
@@ -76,6 +79,8 @@ npm run dev               # Handrail, dashboard and admin API on http://127.0.0.
 
 Open http://127.0.0.1:8787 and click **Set up Handrail**: the first account becomes the admin. Invite everyone else from **Team & keys**; each invite link works once, for one email, with the role you chose.
 
+**Alerts:** with `BREVO_API_KEY` and `HANDRAIL_ALERT_FROM` set, approvers and admins get an email for each held call. Each person can turn theirs off under **Account**. Admins can also add a Slack incoming webhook there, which is stored on the server and only ever shown masked, and send a test alert. The link in an alert opens that call after sign-in. Demo workspaces never send anything; each held call shows an alert preview instead.
+
 **Security:**
 - Passwords are hashed with Argon2id.
 - Sessions live in httpOnly, SameSite=Strict cookies. They are also Secure, except on plain-HTTP localhost.
@@ -94,6 +99,8 @@ Open http://127.0.0.1:8787 and click **Set up Handrail**: the first account beco
 | `HANDRAIL_TRUST_PROXY` | Set to `true` behind a proxy such as Render, so client IPs (for login rate limits) and HTTPS are detected. |
 | `PAYPAL_WEBHOOK_ID` | Receiving webhooks. Register a URL ending in `/webhooks/paypal`. |
 | `ANTHROPIC_API_KEY` | The AI brief and the plain-English policy. Optional. |
+| `BREVO_API_KEY`, `HANDRAIL_ALERT_FROM` | Email alerts for held calls, via [Brevo](https://www.brevo.com) (free: 300 emails a day). The sender address must be verified in Brevo. Without them, email alerts are off and the dashboard says "Alerts off". |
+| `HANDRAIL_PUBLIC_URL` | The dashboard's address, for links in alerts. Defaults to Render's `RENDER_EXTERNAL_URL`, or localhost. |
 | `HANDRAIL_AI_MODEL` | Optional. Defaults to `claude-opus-5-5`. `claude-sonnet-5-5` is faster. |
 
 ### Connect an agent
