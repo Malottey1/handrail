@@ -3,10 +3,34 @@ import type { Policy, Rule } from "../../src/policy/types.js";
 
 export type { Policy, Rule };
 
-export interface Session {
-  token: string;
+export type Role = "admin" | "approver" | "viewer";
+
+export interface User {
+  id: string;
+  email: string;
   name: string;
+  role: Role;
+  isDemo: boolean;
+  createdAt: string;
+  disabled: boolean;
 }
+
+/** The signed-in user. The session itself is an httpOnly cookie; the CSRF token goes in a header on changes. */
+export interface Session {
+  user: User;
+  csrfToken: string;
+}
+
+export interface AuthState {
+  user: User | null;
+  csrfToken: string | null;
+  setupRequired: boolean;
+  demoAccess: boolean;
+}
+
+const RANK: Record<Role, number> = { viewer: 0, approver: 1, admin: 2 };
+/** For showing or hiding controls. The server enforces roles on every request regardless. */
+export const can = (session: Session, role: Role) => RANK[session.user.role] >= RANK[role];
 
 export class ApiError extends Error {
   constructor(
@@ -17,12 +41,14 @@ export class ApiError extends Error {
   }
 }
 
-export async function api<T>(session: Session, path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
+export async function api<T>(session: Session | null, path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
+  const method = init.method ?? "GET";
   const res = await fetch(`/api${path}`, {
-    method: init.method ?? "GET",
+    method,
+    credentials: "same-origin",
     headers: {
-      Authorization: `Bearer ${session.token}`,
       ...(init.body !== undefined ? { "Content-Type": "application/json" } : {}),
+      ...(session && method !== "GET" ? { "X-CSRF-Token": session.csrfToken } : {}),
     },
     body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
   });
@@ -35,9 +61,36 @@ export async function api<T>(session: Session, path: string, init: { method?: st
   }
   if (!res.ok) {
     const message = (data as { error?: string } | null)?.error ?? `HTTP ${res.status}`;
+    if (res.status === 401 && session) window.dispatchEvent(new Event("handrail:signed-out"));
     throw new ApiError(res.status, message);
   }
   return data as T;
+}
+
+export interface Invite {
+  id: string;
+  email: string;
+  role: Role;
+  createdBy: string;
+  createdAt: number;
+  expiresAt: number;
+  usedAt: number | null;
+  revokedAt: number | null;
+}
+
+export interface AgentKey {
+  id: string;
+  name: string;
+  prefix: string;
+  createdBy: string;
+  createdAt: number;
+  revokedAt: number | null;
+  lastUsedAt: number | null;
+}
+
+export interface AgentIdentity {
+  keyId: string | null;
+  name: string;
 }
 
 export interface Money {
@@ -70,6 +123,8 @@ export interface Approval {
   expiresAt: string;
   decidedAt: string | null;
   decidedBy: string | null;
+  decidedById: string | null;
+  agent: AgentIdentity | null;
   note: string | null;
   result: unknown;
   explanation: Explanation | null;
@@ -104,6 +159,8 @@ export interface CallRow {
   operation_key: string | null;
   request_id: string | null;
   outcome: string | null;
+  agent_key_id: string | null;
+  agent_name: string | null;
 }
 
 export type MatchStatus = "matched" | "mismatch" | "outside_handrail" | "unrelated" | "ignored";

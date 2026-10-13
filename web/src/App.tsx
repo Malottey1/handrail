@@ -1,14 +1,18 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { api, ApiError, type Session, type Summary, type VerifyResult } from "./api";
-import { usePoll } from "./components";
+import { useCallback, useEffect, useState } from "react";
+import { api, ApiError, can, type AuthState, type Session, type Summary, type User, type VerifyResult } from "./api";
+import { Logo, ThemeToggle, usePoll } from "./components";
+import { link, navigate, usePath } from "./router";
+import { AccountView } from "./views/Account";
 import { ActivityView } from "./views/Activity";
 import { ApprovalsView } from "./views/Approvals";
 import { AuditView } from "./views/Audit";
+import { LoginPage, SignupPage } from "./views/AuthPages";
+import { HomePage } from "./views/Home";
 import { PolicyView } from "./views/Policy";
+import { TeamView } from "./views/Team";
 import { WebhooksView } from "./views/Webhooks";
 
-const STORAGE_KEY = "handrail.session";
-const TABS = ["approvals", "activity", "webhooks", "audit", "policy"] as const;
+const TABS = ["approvals", "activity", "webhooks", "audit", "policy", "team", "account"] as const;
 type Tab = (typeof TABS)[number];
 const TAB_LABELS: Record<Tab, string> = {
   approvals: "Approvals",
@@ -16,25 +20,67 @@ const TAB_LABELS: Record<Tab, string> = {
   webhooks: "Webhooks",
   audit: "Audit log",
   policy: "Policy",
+  team: "Team & keys",
+  account: "Account",
 };
+const ROLE_LABELS = { admin: "Admin", approver: "Approver", viewer: "Viewer" } as const;
 
-// Per-tab session: closing the tab signs out. Storage can be unavailable
-// (private windows, blocked site data), so every access is guarded.
-function loadSession(): Session | null {
-  try {
-    const raw = sessionStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as Session) : null;
-  } catch {
-    return null;
+/** Loads who is signed in, then shows the page for the current path. */
+export function App() {
+  const path = usePath();
+  const [auth, setAuth] = useState<AuthState | null>(null);
+  const [error, setError] = useState<Error | null>(null);
+
+  const reload = useCallback(() => {
+    api<AuthState>(null, "/auth/session").then(
+      (a) => (setAuth(a), setError(null)),
+      (e: Error) => setError(e),
+    );
+  }, []);
+  useEffect(reload, [reload]);
+
+  // Any 401 (session expired, signed out elsewhere, account disabled) re-checks the session.
+  useEffect(() => {
+    window.addEventListener("handrail:signed-out", reload);
+    return () => window.removeEventListener("handrail:signed-out", reload);
+  }, [reload]);
+
+  if (!auth) {
+    return (
+      <div className="page-center">
+        {error ? <p className="error">Can't reach Handrail: {error.message}</p> : <p className="muted">Loading…</p>}
+      </div>
+    );
   }
+
+  const session: Session | null = auth.user && auth.csrfToken ? { user: auth.user, csrfToken: auth.csrfToken } : null;
+  const signedIn = (s: Session) => {
+    setAuth({ ...auth, user: s.user, csrfToken: s.csrfToken, setupRequired: false });
+    navigate("/app");
+  };
+
+  if (path === "/login") return session ? <Redirect to="/app" /> : <LoginPage auth={auth} onSignedIn={signedIn} />;
+  if (path === "/signup") return session ? <Redirect to="/app" /> : <SignupPage auth={auth} onSignedIn={signedIn} />;
+  if (path === "/app") {
+    if (!session) return <Redirect to="/login" />;
+    return (
+      <Dashboard
+        session={session}
+        onUserChange={(user) => setAuth({ ...auth, user })}
+        onSignOut={async () => {
+          await api(session, "/auth/logout", { method: "POST" }).catch(() => {});
+          setAuth({ ...auth, user: null, csrfToken: null });
+          navigate("/");
+        }}
+      />
+    );
+  }
+  return <HomePage auth={auth} session={session} onSignedIn={signedIn} />;
 }
-function saveSession(s: Session | null) {
-  try {
-    if (s) sessionStorage.setItem(STORAGE_KEY, JSON.stringify(s));
-    else sessionStorage.removeItem(STORAGE_KEY);
-  } catch {
-    // Not persisted; the session lasts until reload.
-  }
+
+function Redirect({ to }: { to: string }) {
+  useEffect(() => navigate(to, { replace: true }), [to]);
+  return null;
 }
 
 function tabFromHash(): Tab {
@@ -42,27 +88,7 @@ function tabFromHash(): Tab {
   return TABS.includes(t) ? t : "approvals";
 }
 
-export function App() {
-  const [session, setSession] = useState<Session | null>(loadSession);
-  const signOut = useCallback(() => {
-    saveSession(null);
-    setSession(null);
-  }, []);
-
-  if (!session) {
-    return (
-      <SignIn
-        onSignIn={(s) => {
-          saveSession(s);
-          setSession(s);
-        }}
-      />
-    );
-  }
-  return <Dashboard session={session} onSignOut={signOut} />;
-}
-
-function Dashboard({ session, onSignOut }: { session: Session; onSignOut: () => void }) {
+function Dashboard({ session, onSignOut, onUserChange }: { session: Session; onSignOut: () => void; onUserChange: (u: User) => void }) {
   const [tab, setTab] = useState<Tab>(tabFromHash);
   useEffect(() => {
     const onHash = () => setTab(tabFromHash());
@@ -73,34 +99,45 @@ function Dashboard({ session, onSignOut }: { session: Session; onSignOut: () => 
   const summary = usePoll(() => api<Summary>(session, "/summary"), 3000);
   const verify = usePoll(() => api<VerifyResult>(session, "/audit/verify"), 10000);
 
-  // A rotated admin token signs everyone out instead of failing silently.
-  useEffect(() => {
-    if (summary.error instanceof ApiError && summary.error.status === 401) onSignOut();
-  }, [summary.error, onSignOut]);
-
   const s = summary.data;
   const pending = s?.pendingApprovals ?? 0;
   useEffect(() => {
     document.title = pending > 0 ? `(${pending}) Handrail` : "Handrail";
   }, [pending]);
 
+  const tabs = TABS.filter((t) => t !== "account" && (t !== "team" || can(session, "admin")));
+  const shown = tab === "team" && !can(session, "admin") ? "approvals" : tab;
+
   return (
     <div className="app">
       <header className="topbar">
-        <div className="brand">
+        <a className="brand" {...link("/")} aria-label="Handrail home">
           <Logo />
           <span className="brand-name">Handrail</span>
           <span className="env">Sandbox</span>
-        </div>
+        </a>
         <IntegrityBadge verify={verify.data} error={verify.error} onClick={() => (location.hash = "audit")} />
         <div className="who">
-          <span>{session.name}</span>
+          <a className={`user-chip ${shown === "account" ? "active" : ""}`} href="#account" title="Your account">
+            <span className="avatar" aria-hidden="true">
+              {initials(session.user.name)}
+            </span>
+            <span className="user-name">{session.user.name}</span>
+            <span className={`role role-${session.user.role}`}>{ROLE_LABELS[session.user.role]}</span>
+          </a>
+          <ThemeToggle />
           <button className="btn btn-ghost" onClick={onSignOut}>
             Sign out
           </button>
         </div>
       </header>
 
+      {session.user.isDemo && (
+        <div className="banner banner-demo">
+          You're using the shared demo account (approver) on PayPal's sandbox. No real money moves. Decisions are recorded as "Demo
+          Approver".
+        </div>
+      )}
       {summary.error && !(summary.error instanceof ApiError && summary.error.status === 401) && (
         <div className="banner">Can't reach Handrail: {summary.error.message}. Retrying…</div>
       )}
@@ -111,12 +148,12 @@ function Dashboard({ session, onSignOut }: { session: Session; onSignOut: () => 
         <Stat label="Sent to PayPal" value={s?.last24h.forwarded} />
         <Stat label="Blocked" value={s?.last24h.blocked} />
         <Stat label="Duplicates stopped" value={s?.last24h.duplicates} />
-        <Stat label="Webhook flags" value={s?.webhooks.flagged} tone={s && s.webhooks.flagged > 0 ? "bad" : undefined} />
+        <Stat label="Webhook flags" value={s?.webhooks.flagged} tone={s && s.webhooks.flagged > 0 ? "flag" : undefined} />
       </section>
 
       <nav className="tabs" role="tablist">
-        {TABS.map((t) => (
-          <a key={t} href={`#${t}`} role="tab" aria-selected={tab === t} className={`tab ${tab === t ? "active" : ""}`}>
+        {tabs.map((t) => (
+          <a key={t} href={`#${t}`} role="tab" aria-selected={shown === t} className={`tab ${shown === t ? "active" : ""}`}>
             {TAB_LABELS[t]}
             {t === "approvals" && pending > 0 && <span className="tab-badge">{pending}</span>}
           </a>
@@ -124,15 +161,25 @@ function Dashboard({ session, onSignOut }: { session: Session; onSignOut: () => 
       </nav>
 
       <main className="main">
-        {tab === "approvals" && <ApprovalsView session={session} onChange={summary.refresh} />}
-        {tab === "activity" && <ActivityView session={session} />}
-        {tab === "webhooks" && <WebhooksView session={session} />}
-        {tab === "audit" && <AuditView session={session} verify={verify.data} />}
-        {tab === "policy" && <PolicyView session={session} />}
+        {shown === "approvals" && <ApprovalsView session={session} onChange={summary.refresh} />}
+        {shown === "activity" && <ActivityView session={session} />}
+        {shown === "webhooks" && <WebhooksView session={session} />}
+        {shown === "audit" && <AuditView session={session} verify={verify.data} />}
+        {shown === "policy" && <PolicyView session={session} />}
+        {shown === "team" && <TeamView session={session} />}
+        {shown === "account" && <AccountView session={session} onUserChange={onUserChange} />}
       </main>
     </div>
   );
 }
+
+const initials = (name: string) =>
+  name
+    .split(/\s+/)
+    .map((p) => p[0] ?? "")
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
 
 function Stat({ label, value, tone }: { label: string; value: number | undefined; tone?: string }) {
   return (
@@ -159,67 +206,5 @@ function IntegrityBadge({ verify, error, onClick }: { verify: VerifyResult | nul
         {verify.entries} entries · {verify.head.slice(0, 8)}
       </span>
     </button>
-  );
-}
-
-function SignIn({ onSignIn }: { onSignIn: (s: Session) => void }) {
-  const [token, setToken] = useState("");
-  const [name, setName] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    const session = { token: token.trim(), name: name.trim() || "admin" };
-    setBusy(true);
-    setError(null);
-    try {
-      await api<Summary>(session, "/summary");
-      onSignIn(session);
-    } catch (err) {
-      setError(err instanceof ApiError && err.status === 401 ? "That admin token isn't right." : (err as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="signin">
-      <form className="signin-card" onSubmit={submit}>
-        <div className="brand">
-          <Logo />
-          <span className="brand-name">Handrail</span>
-        </div>
-        <p className="signin-lede">Approve held agent payments, and see everything the agent did with PayPal.</p>
-        <label>
-          Your name
-          <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Recorded with each decision" autoFocus />
-        </label>
-        <label>
-          Admin token
-          <input
-            className="input"
-            type="password"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            placeholder="HANDRAIL_ADMIN_TOKEN from .env"
-            autoComplete="current-password"
-          />
-        </label>
-        {error && <p className="error">{error}</p>}
-        <button className="btn btn-primary" disabled={busy || !token.trim()}>
-          {busy ? "Checking…" : "Sign in"}
-        </button>
-      </form>
-    </div>
-  );
-}
-
-function Logo() {
-  return (
-    <svg className="logo" viewBox="0 0 32 32" aria-hidden="true">
-      <rect width="32" height="32" rx="7" fill="currentColor" />
-      <path d="M6 11h20M9 11v13M16 11v13M23 11v13" stroke="var(--logo-ink)" strokeWidth="2.6" strokeLinecap="round" />
-    </svg>
   );
 }

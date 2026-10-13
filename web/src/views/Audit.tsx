@@ -19,13 +19,19 @@ const KIND_LABELS: Record<string, string> = {
   "webhook.received": "Webhook received",
   "policy.loaded": "Policy loaded",
   "policy.changed": "Policy changed",
+  "user.created": "Account created",
+  "user.updated": "Account changed",
+  "invite.created": "Invite sent",
+  "invite.revoked": "Invite revoked",
+  "agent_key.created": "Agent key created",
+  "agent_key.revoked": "Agent key revoked",
 };
 
 function summarize(e: AuditEntry): string {
   const d = e.data as Record<string, any>;
   switch (e.kind) {
     case "call.decided":
-      return `${d.tool}: ${d.decision}. ${d.reason ?? ""}`;
+      return `${d.tool}: ${d.decision}. ${d.reason ?? ""}${d.agent ? ` (agent: ${d.agent.name})` : ""}`;
     case "call.duplicate":
       return `${d.tool}: repeat of an earlier call, not sent again`;
     case "call.finished":
@@ -33,7 +39,7 @@ function summarize(e: AuditEntry): string {
     case "approval.created":
       return `${d.tool}: ${d.evaluation?.reason ?? ""}`;
     case "approval.decided":
-      return `${d.decision} by ${d.decidedBy}${d.note ? `: “${d.note}”` : ""}`;
+      return `${d.decision === "approved" ? "Approved" : "Rejected"} by ${d.decidedBy}${d.note ? `: “${d.note}”` : ""}`;
     case "approval.completed":
       return `status ${d.status}`;
     case "webhook.received":
@@ -50,6 +56,25 @@ function summarize(e: AuditEntry): string {
       ].filter(Boolean);
       return `${parts.join("; ")} by ${d.by}${d.source ? `: “${d.source}”` : ""}`;
     }
+    case "user.created":
+      return `${d.user?.name} (${d.user?.email}) as ${d.role}, via ${d.via}`;
+    case "user.updated": {
+      const c = d.changes ?? {};
+      const what = [
+        c.role ? `role ${c.role}` : "",
+        c.disabled === true ? "disabled" : c.disabled === false && c.role === undefined ? "enabled" : "",
+        c.password ? "password changed" : "",
+        c.name && !c.role && !c.password ? `profile updated` : "",
+      ].filter(Boolean);
+      return `${d.user?.name}: ${what.join(", ") || "updated"} by ${d.by?.name}`;
+    }
+    case "invite.created":
+      return `${d.email} invited as ${d.role} by ${d.by?.name}`;
+    case "invite.revoked":
+    case "agent_key.revoked":
+      return `by ${d.by?.name}`;
+    case "agent_key.created":
+      return `“${d.name}” (${d.prefix}…) by ${d.by?.name}`;
     case "chain.started":
       return `${d.toolCallsBefore} earlier calls predate the log`;
     default:

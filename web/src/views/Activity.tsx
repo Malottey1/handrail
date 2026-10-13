@@ -1,7 +1,7 @@
 import type { ColDef } from "ag-grid-community";
 import { AgGridReact } from "ag-grid-react";
 import { useMemo, useState } from "react";
-import { api, type AuditEntry, type CallRow, type RuleHit, type Session } from "../api";
+import { api, type Approval, type AuditEntry, type CallRow, type RuleHit, type Session } from "../api";
 import { DecisionPill, Drawer, JsonBlock, Mono, Pill, StatusPill, usePoll } from "../components";
 import { callAmount, callDecision, formatMoney, formatTime, parseJson, paypalSummary, toolLabel } from "../format";
 import { useGridTheme } from "../grid";
@@ -41,6 +41,7 @@ export function ActivityView({ session }: { session: Session }) {
         valueGetter: (p) => (p.data ? paypalSummary(parseJson(p.data.result_json)) : ""),
       },
       { headerName: "Reason", field: "reason", flex: 2, minWidth: 220, tooltipField: "reason" },
+      { headerName: "Agent", field: "agent_name", width: 160, valueFormatter: (p) => p.value ?? "–" },
       { headerName: "PayPal-Request-Id", field: "request_id", width: 190, filter: false, hide: window.innerWidth < 1400, cellClass: "mono-cell" },
     ],
     [],
@@ -71,6 +72,12 @@ export function ActivityView({ session }: { session: Session }) {
 
 function CallDrawer({ call, session, onClose }: { call: CallRow; session: Session; onClose: () => void }) {
   const audit = usePoll(() => api<AuditEntry[]>(session, `/audit?ref=call:${call.id}`), 5000, String(call.id));
+  const approval = usePoll(
+    () => (call.approval_id ? api<Approval>(session, `/approvals/${call.approval_id}`) : Promise.resolve(null)),
+    5000,
+    String(call.id),
+  );
+  const decided = approval.data?.decidedBy ? approval.data : null;
   const hits = parseJson<RuleHit[]>(call.hits_json) ?? [];
   const result = parseJson(call.result_json);
 
@@ -90,11 +97,21 @@ function CallDrawer({ call, session, onClose }: { call: CallRow; session: Sessio
         {call.forwarded ? <Pill tone="info">Sent to PayPal</Pill> : <Pill tone="muted">Not sent to PayPal</Pill>}
       </div>
       <p className="detail-reason">{call.reason}</p>
+      {decided && (
+        <p className="detail-decider">
+          {decided.status === "rejected" ? "Rejected" : "Approved"} by <strong>{decided.decidedBy}</strong>
+          {decided.note && <> · “{decided.note}”</>}
+        </p>
+      )}
 
       <dl className="kv">
         <div>
           <dt>time</dt>
           <dd>{new Date(call.created_at).toLocaleString()}</dd>
+        </div>
+        <div>
+          <dt>agent</dt>
+          <dd>{call.agent_name ?? "Not recorded (before agent keys)"}</dd>
         </div>
         <div>
           <dt>tool</dt>

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, ApiError, type Approval, type Session } from "../api";
+import { api, ApiError, can, type Approval, type Session } from "../api";
 import { DecisionPill, Empty, Mono, Pill, StatusPill, useNow, usePoll } from "../components";
 import { countdown, formatMoney, paypalSummary, timeAgo, toolLabel } from "../format";
 
@@ -56,7 +56,15 @@ export function ApprovalsView({ session, onChange }: { session: Session; onChang
                   <StatusPill status={a.status} />
                 </div>
                 <div className="decided-meta">
-                  {a.decidedBy ? `${a.status === "rejected" ? "Rejected" : "Approved"} by ${a.decidedBy}` : "No decision"}
+                  {a.decidedBy ? (
+                    <>
+                      {a.status === "rejected" ? "Rejected" : "Approved"} by <strong>{a.decidedBy}</strong>
+                    </>
+                  ) : a.status === "expired" ? (
+                    "Nobody decided in time"
+                  ) : (
+                    "No decision"
+                  )}
                   {a.decidedAt && ` · ${timeAgo(a.decidedAt, now)}`}
                   {a.note && <> · “{a.note}”</>}
                   {a.result != null && paypalSummary(a.result) && <> · {paypalSummary(a.result)}</>}
@@ -143,14 +151,14 @@ function ApprovalCard({ approval: a, session, now, onDecided }: { approval: Appr
     try {
       const result = await api<Approval>(session, `/approvals/${a.id}/${action}`, {
         method: "POST",
-        body: { by: session.name, note: note.trim() || undefined },
+        body: { note: note.trim() || undefined },
       });
       const summary = paypalSummary(result.result);
       setOutcome(
         result.status === "executed"
           ? { tone: "good", text: `Approved and sent to PayPal${summary ? `: ${summary}` : ""}` }
           : result.status === "rejected"
-            ? { tone: "muted", text: "Rejected. The agent was told no." }
+            ? { tone: "bad", text: "Rejected. The agent was told no." }
             : { tone: "bad", text: `${result.status === "blocked" ? "Blocked on re-check" : "PayPal returned an error"}${summary ? `: ${summary}` : ""}` },
       );
       setTimeout(onDecided, 2500);
@@ -214,6 +222,12 @@ function ApprovalCard({ approval: a, session, now, onDecided }: { approval: Appr
             <dd>{a.payee}</dd>
           </div>
         )}
+        {a.agent && (
+          <div>
+            <dt>agent</dt>
+            <dd>{a.agent.name}</dd>
+          </div>
+        )}
         <div>
           <dt>requested</dt>
           <dd>{timeAgo(a.createdAt, now)}</dd>
@@ -222,6 +236,8 @@ function ApprovalCard({ approval: a, session, now, onDecided }: { approval: Appr
 
       {outcome ? (
         <p className={`outcome outcome-${outcome.tone}`}>{outcome.text}</p>
+      ) : !can(session, "approver") ? (
+        <p className="outcome outcome-muted">You're a viewer, so you can see this call but not decide it. An approver or admin decides.</p>
       ) : (
         <div className="decide">
           <input

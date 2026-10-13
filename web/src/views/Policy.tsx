@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, ApiError, type Decision, type Policy, type PolicyProposal, type PolicyResponse, type Session } from "../api";
+import { api, ApiError, can, type Decision, type Policy, type PolicyProposal, type PolicyResponse, type Session } from "../api";
 import { DecisionPill, JsonBlock, Mono, usePoll } from "../components";
 import { describeRule } from "../format";
 
@@ -27,7 +27,7 @@ export function PolicyView({ session }: { session: Session }) {
 
   async function save(next: Policy, source: string): Promise<string | null> {
     try {
-      await api(session, "/policy", { method: "PUT", body: { policy: next, baseHash: data.hash, by: session.name, source } });
+      await api(session, "/policy", { method: "PUT", body: { policy: next, baseHash: data.hash, source } });
       policy.refresh();
       return null;
     } catch (err) {
@@ -44,6 +44,7 @@ export function PolicyView({ session }: { session: Session }) {
   }
 
   const rules = [...data.policy.rules].sort((a, b) => SEVERITY[a.decision] - SEVERITY[b.decision]);
+  const isAdmin = can(session, "admin");
   return (
     <div className="policy">
       <p className="lede">
@@ -51,13 +52,17 @@ export function PolicyView({ session }: { session: Session }) {
         past a block. If Handrail can't work out an amount or payee, the call is held rather than guessed.
       </p>
 
-      <Composer session={session} enabled={data.ai.enabled} onApply={save} />
+      {isAdmin ? (
+        <Composer session={session} enabled={data.ai.enabled} onApply={save} />
+      ) : (
+        <p className="notice">Only admins can change the policy. You can see every rule that applies.</p>
+      )}
 
       <section className="card">
         <h2 className="section-title">Rules</h2>
         <ul className="rules">
           {rules.map((r) => (
-            <li key={r.id} className="has-delete">
+            <li key={r.id} className={isAdmin ? "has-delete" : undefined}>
               <DecisionPill decision={r.decision} />
               <div>
                 <p className="rule-text">{describeRule(r)}</p>
@@ -66,9 +71,11 @@ export function PolicyView({ session }: { session: Session }) {
                   {r.description && <> · {r.description}</>}
                 </p>
               </div>
-              <button className="btn btn-ghost rule-delete" onClick={() => void removeRule(r.id)} aria-label={`Remove ${r.id}`}>
-                Remove
-              </button>
+              {isAdmin && (
+                <button className="btn btn-ghost rule-delete" onClick={() => void removeRule(r.id)} aria-label={`Remove ${r.id}`}>
+                  Remove
+                </button>
+              )}
             </li>
           ))}
         </ul>
