@@ -27,7 +27,8 @@
     "dev:web": "vite --config web/vite.config.ts",
     "build:web": "vite build --config web/vite.config.ts",
     "check:secrets": "node scripts/check-secrets.mjs --all",
-    "prepare": "git config core.hooksPath .githooks 2>/dev/null || true"
+    "prepare": "git config core.hooksPath .githooks 2>/dev/null || true",
+    "real-model-run": "node --disable-warning=ExperimentalWarning --import tsx scripts/real-model-run.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",

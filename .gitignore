@@ -44,3 +44,7 @@ venv/
 !packages/typescript/handrail-ai-sdk/dist/
 !packages/typescript/handrail-langchain/dist/
 examples/**/package-lock.json
+
+# Real-model run reports and logs (scripts/real-model-run.ts)
+real-model-runs/
+.venv-examples/

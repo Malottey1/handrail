@@ -114,6 +114,7 @@ TypeScript, Node.js, the official MCP TypeScript SDK (Handrail is an MCP server 
 - `npm run approvals [-- approve|reject <id> [note]]`: decide held calls via the admin API (uses `HANDRAIL_ADMIN_TOKEN`; local only, recorded as "Admin script").
 - `npm run audit:verify`: checks the hash chain and that the working tables match it; exits 1 on tampering.
 - `npm run probe`: re-checks which PayPal MCP endpoints work.
+- `npm run real-model-run [-- python|ai-sdk|langchain-js]`: runs the switched examples with a real LLM (OPENAI_API_KEY in .env) against a throwaway Handrail (port 8795, temp DB, random agent key/admin token, no AI briefs or alerts) and fresh 200.00 USD sandbox sales; examples get a minimal env (no PayPal credentials). Report in real-model-runs/ (ignored): agent's final words and, from Handrail's call log, whether the held $150 refund was retried.
 - `npm run check:secrets`: scans every tracked file for secrets (the pre-commit hook checks staged changes).
 - `npm run check:drop-in [-- --update]`: compares what an agent sees from PayPal's MCP server with what it sees from Handrail; exits 1 on any difference beyond the documented additions.
 

@@ -343,6 +343,31 @@ PayPal's official examples ([`examples/typescript`](examples/typescript)) switch
 150.00 USD: pending_approval (approval apr_…). Approve it in Handrail's dashboard.
 ```
 
+### Run the switched examples with a real model
+
+`npm run real-model-run` runs all three switched examples (Python LangChain, TypeScript AI SDK, TypeScript LangChain) with a real LLM, against a throwaway Handrail and PayPal's sandbox:
+- Each example gets a fresh 200.00 USD sandbox sale and is asked for a $5.00 refund (allowed) and a $150.00 refund (held).
+- The script records what the agent told the user and whether it retried the held refund. It works this out from Handrail's own call log, not the agent's word.
+- The examples get only a Handrail URL, an agent key and the capture id, never PayPal credentials.
+- The report goes to `real-model-runs/` (git-ignored).
+
+```bash
+# 1. PayPal's examples use OpenAI (gpt-4o): add OPENAI_API_KEY=... to .env
+
+# 2. Python example dependencies (the local packages, plus PayPal's pinned LangChain)
+python3.12 -m venv .venv-examples
+.venv-examples/bin/pip install -e packages/python/handrail-core -e packages/python/handrail-langchain "langchain==0.3.23" "langchain-openai==0.2.2" python-dotenv
+
+# 3. TypeScript example dependencies
+(cd examples/typescript/ai-sdk && npm install --install-links)
+(cd examples/typescript/langchain && npm install --install-links)
+
+# 4. Run (or one at a time: npm run real-model-run -- python | ai-sdk | langchain-js)
+npm run real-model-run
+```
+
+Each run makes three sandbox sales and some OpenAI calls. The AI SDK example also runs PayPal's order workflow first, which creates a sandbox order.
+
 ### Try the demos
 
 ```bash
