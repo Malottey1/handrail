@@ -20,6 +20,25 @@ export class HandrailError extends Error {
 
 export type CallToolResult = { content?: Array<{ type: string; text?: string }>; isError?: boolean };
 
+/**
+ * The JSON in a tool's text result: PayPal's answer, or Handrail's own. When
+ * Handrail answers instead of PayPal (held, blocked, expired…), the text starts
+ * with plain instructions for the model and the JSON follows on its own line.
+ */
+export function resultJson(text: string): any {
+  try {
+    return JSON.parse(text);
+  } catch {
+    const start = text.indexOf("\n{");
+    if (start < 0) return null;
+    try {
+      return JSON.parse(text.slice(start + 1));
+    } catch {
+      return null;
+    }
+  }
+}
+
 export class HandrailClient {
   readonly url: string;
   readonly #agentKey: string;

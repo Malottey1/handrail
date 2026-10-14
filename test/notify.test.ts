@@ -289,9 +289,10 @@ describe("held-call expiry", () => {
 
     // The agent checking on it is told it expired and wasn't sent.
     const answer = await ws.gate.handle("handrail_get_approval", { approval_id: id });
-    const payload = JSON.parse((answer.content[0] as { text: string }).text).handrail;
+    const payload = JSON.parse((answer.content.at(-1) as { text: string }).text).handrail;
     assert.equal(payload.status, "expired");
-    assert.match(payload.next_step, /expired\. It was not sent to PayPal/);
+    assert.match(payload.next_step, /expired because nobody decided in time, so nothing was sent to PayPal/);
+    assert.equal((answer.content[0] as { text: string }).text, payload.next_step, "the model reads the plain words first");
 
     // The call log row for the held call says expired, and the audit chain records it.
     const row = ws.callLog.recent(10).find((r) => r.approval_id === id)!;

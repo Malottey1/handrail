@@ -52,11 +52,16 @@ export function parseJson<T = unknown>(json: string | null | undefined): T | nul
   }
 }
 
-/** PayPal's answer inside an MCP result, parsed if it's JSON. */
+/**
+ * The JSON inside an MCP result: PayPal's answer, or Handrail's own (which
+ * follows a plain-words line for the model). Null if no block is JSON.
+ */
 export function paypalResponse(result: unknown): Record<string, any> | null {
-  const text = (result as { content?: Array<{ text?: string }> } | null)?.content?.[0]?.text;
-  if (typeof text !== "string") return null;
-  return parseJson<Record<string, any>>(text);
+  for (const block of (result as { content?: Array<{ text?: string }> } | null)?.content ?? []) {
+    const parsed = typeof block.text === "string" ? parseJson<Record<string, any>>(block.text) : null;
+    if (parsed && typeof parsed === "object") return parsed;
+  }
+  return null;
 }
 
 const HANDRAIL_STATUS: Record<string, string> = {
@@ -67,7 +72,7 @@ const HANDRAIL_STATUS: Record<string, string> = {
 
 /** One line describing what PayPal said, e.g. "COMPLETED · 0AB12345CD6789012". */
 export function paypalSummary(result: unknown): string {
-  const handrail = (result as { handrail?: { status?: string; message?: string } } | null)?.handrail;
+  const handrail = ((result as { handrail?: unknown } | null)?.handrail ?? paypalResponse(result)?.handrail) as { status?: string; message?: string } | undefined;
   if (handrail) return handrail.message ?? HANDRAIL_STATUS[handrail.status ?? ""] ?? handrail.status ?? "";
   const r = paypalResponse(result);
   if (!r) return "";

@@ -66,6 +66,19 @@ var HandrailError = class extends Error {
   }
   status;
 };
+function resultJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    const start = text.indexOf("\n{");
+    if (start < 0) return null;
+    try {
+      return JSON.parse(text.slice(start + 1));
+    } catch {
+      return null;
+    }
+  }
+}
 var HandrailClient = class {
   url;
   #agentKey;
@@ -4425,7 +4438,8 @@ export {
   HandrailClient,
   HandrailError,
   HandrailTool,
-  isToolAllowed
+  isToolAllowed,
+  resultJson
 };
 /*!
  * Contains material from PayPal's Agent Toolkit (https://github.com/paypal/agent-toolkit, typescript/src/shared/tools.ts),

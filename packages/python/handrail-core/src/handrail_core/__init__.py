@@ -4,7 +4,7 @@ They give an agent the same PayPal tools as PayPal's Agent Toolkit, but every
 call goes to Handrail with an agent key, never to PayPal with credentials.
 """
 
-from .client import DEFAULT_TIMEOUT, HandrailClient, HandrailError
+from .client import DEFAULT_TIMEOUT, HandrailClient, HandrailError, result_json
 from .configuration import GET_APPROVAL_TOOL, Configuration, Context, is_tool_allowed
 from .schema import model_from_schema, to_plain
 from .tools import ToolSpec, tool_specs
@@ -19,6 +19,7 @@ __all__ = [
     "ToolSpec",
     "is_tool_allowed",
     "model_from_schema",
+    "result_json",
     "to_plain",
     "tool_specs",
 ]

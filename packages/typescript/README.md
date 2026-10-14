@@ -45,7 +45,7 @@ Change the import and the constructor. Keep everything else:
 
 - **The constructor is synchronous**, like PayPal's. The tool list (names, descriptions, JSON Schemas) is a snapshot of what Handrail serves, bundled in the package (`core/tools.json`, generated with `npm run snapshot`). A test fails if it ever differs from what Handrail would serve. Each tool's schema is converted to Zod for the framework, so arguments are validated before anything is sent.
 - **`handrail_get_approval`** is always included, so the agent can check on a held call.
-- **Held calls:** a held refund returns Handrail's JSON instead of PayPal's, e.g. `{"handrail": {"status": "pending_approval", "approval_id": "apr_…", "next_step": "NOT EXECUTED YET…"}}`. Blocked and duplicate calls also come back as text.
+- **Held calls:** a held refund returns Handrail's answer instead of PayPal's. Plain instructions for the model come first ("Not executed. Pending human approval (id apr_…). Do not retry this call. …"), then the JSON (`{"handrail": {"status": "pending_approval", …}}`). `resultJson(text)` returns that JSON for code. Blocked and expired calls work the same way.
 - **Errors:** Handrail unreachable or key refused returns as text, `Error calling '<tool>' through Handrail: …`.
 - **Timeouts:** a held call waits about 20 seconds for a decision; the default timeout is 60 s (`timeoutMs`).
 - **Tool names:** the tools are Handrail's (PayPal's MCP tool set). These match PayPal's TypeScript toolkit, including `create_refund`.

@@ -26,5 +26,5 @@ export class HandrailAgentToolkit {
 }
 
 export { HandrailWorkflows } from "./workflows.js";
-export { ALL_TOOLS_ENABLED, HandrailClient, HandrailError, GET_APPROVAL_TOOL, isToolAllowed } from "../../core/toolkit.js";
+export { ALL_TOOLS_ENABLED, HandrailClient, HandrailError, GET_APPROVAL_TOOL, isToolAllowed, resultJson } from "../../core/toolkit.js";
 export type { Configuration, HandrailToolkitOptions } from "../../core/toolkit.js";

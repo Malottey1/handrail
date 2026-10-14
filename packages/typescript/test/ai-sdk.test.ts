@@ -63,3 +63,13 @@ describe("handrail-ai-sdk", () => {
     assert.equal(JSON.stringify(new HandrailAgentToolkit({ url: h.url, agentKey: h.agentKey, configuration: REFUNDS }).client).includes(h.agentKey), false);
   });
 });
+
+describe("handrail-ai-sdk: what the model reads", () => {
+  it("a held refund starts with plain instructions; the JSON follows for code", async () => {
+    const h = await startHandrail();
+    const tools = new HandrailAgentToolkit({ url: h.url, agentKey: h.agentKey, configuration: REFUNDS }).getTools();
+    const out: string = await run(tools.create_refund, refund("150.00"));
+    assert.match(out.split("\n")[0]!, /^Not executed\. Pending human approval \(id apr_[a-f0-9]+\)\. Do not retry this call\. Tell the user it is awaiting review; use handrail_get_approval/);
+    assert.equal(status(out), "pending_approval");
+  });
+});

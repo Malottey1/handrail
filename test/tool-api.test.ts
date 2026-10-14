@@ -111,7 +111,7 @@ async function session(call: (name: string, args: Record<string, unknown>) => Pr
   const held = await call("create_refund", { capture_id: "CAP1", amount: { currency_code: "USD", value: "500.00" }, idempotency_key: "b" }); // held
   results.push(held);
   results.push(await call("create_refund", { capture_id: "CAP1", amount: { currency_code: "USD", value: "500.00" }, idempotency_key: "b" })); // retry: duplicate
-  const approvalId = JSON.parse((held.content[0] as { text: string }).text).handrail.approval_id as string;
+  const approvalId = JSON.parse((held.content.at(-1) as { text: string }).text).handrail.approval_id as string;
   results.push(await call("handrail_get_approval", { approval_id: approvalId }));
   results.push(await call("create_refund", { capture_id: "CAP1", amount: { currency_code: "USD", value: "5000.00" }, idempotency_key: "c" })); // blocked
   results.push(await call("not_a_paypal_tool", {})); // unknown: held (fails closed)
@@ -176,7 +176,7 @@ describe("REST tool-call API vs MCP", () => {
   it("a held call approved in the dashboard is returned by handrail_get_approval over REST", async () => {
     const w = await world();
     const held = (await (await rest(w.base, w.secret, "POST", "/v1/tools/call", { name: "create_refund", arguments: { capture_id: "CAP1", amount: { currency_code: "USD", value: "500.00" } } })).json()) as CallToolResult;
-    const id = JSON.parse((held.content[0] as { text: string }).text).handrail.approval_id;
+    const id = JSON.parse((held.content.at(-1) as { text: string }).text).handrail.approval_id;
     await w.gate.approve(id, "Ada", null);
     const after = (await (await rest(w.base, w.secret, "POST", "/v1/tools/call", { name: "handrail_get_approval", arguments: { approval_id: id } })).json()) as CallToolResult;
     assert.match((after.content[0] as { text: string }).text, /approved by Ada/);

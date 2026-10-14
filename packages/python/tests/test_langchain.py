@@ -1,5 +1,7 @@
 import json
 
+from handrail_core import result_json
+
 import pytest
 from langchain_core.tools import BaseTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
@@ -20,9 +22,10 @@ def test_same_shape_as_paypals_toolkit(handrail, key):
 def test_allowed_refund_and_held_refund(handrail, key):
     refund = HandrailToolkit(url=handrail.url, agent_key=key, configuration=REFUNDS).get_tools()[0]
     small = refund.invoke({"capture_id": "2GG27306VR5212345", "amount": {"currency_code": "USD", "value": "5.00"}})
-    assert json.loads(small)["status"] == "COMPLETED"
+    assert result_json(small)["status"] == "COMPLETED"
     held = refund.invoke({"capture_id": "2GG27306VR5212345", "amount": {"currency_code": "USD", "value": "250.00"}, "idempotency_key": "r-2"})
-    assert json.loads(held)["handrail"]["status"] == "pending_approval"
+    assert held.startswith("Not executed. Pending human approval (id apr_0123456789abcdef0123). Do not retry this call."), "plain words first, for the model"
+    assert result_json(held)["handrail"]["status"] == "pending_approval"
     # What Handrail received: plain JSON, no None fields, nothing from PayPal's credentials.
     assert handrail.calls()[-1] == {
         "name": "create_refund",

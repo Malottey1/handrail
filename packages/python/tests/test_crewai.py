@@ -1,5 +1,7 @@
 import json
 
+from handrail_core import result_json
+
 import pytest
 
 crewai = pytest.importorskip("crewai")
@@ -16,6 +18,7 @@ def test_crewai_tools_call_handrail(handrail, key):
     assert all(isinstance(t, BaseTool) for t in tools)
     small = tools[0].run(capture_id="C1", amount={"currency_code": "USD", "value": "5.00"})
     held = tools[0].run(capture_id="C1", amount={"currency_code": "USD", "value": "150.00"})
-    assert json.loads(small)["status"] == "COMPLETED"
-    assert json.loads(held)["handrail"]["status"] == "pending_approval"
+    assert result_json(small)["status"] == "COMPLETED"
+    assert held.startswith("Not executed. Pending human approval")
+    assert result_json(held)["handrail"]["status"] == "pending_approval"
     assert all(r["path"].startswith("/v1/tools") for r in handrail.requests)

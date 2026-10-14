@@ -150,9 +150,9 @@ export class Gate {
           tool,
           reason: evaluation.reason,
           rules: evaluation.hits.filter((h) => h.decision === "block").map((h) => h.ruleId),
-          next_step: "This action is not allowed by policy. Do not retry it. Tell the user why it was blocked.",
         },
         true,
+        TELL_MODEL.blocked(evaluation.reason),
       );
       this.deps.callLog.finish(callId, result, "blocked", 0, this.now());
       return result;
@@ -179,7 +179,7 @@ export class Gate {
     // and an approval never overrides a block.
     const evaluation = this.evaluate(approval.facts, now, approval.agent, true, id);
     if (evaluation.decision !== "allow") {
-      const result = handrailResult({ status: "blocked", tool: approval.tool, reason: evaluation.reason, approval_id: id }, true);
+      const result = handrailResult({ status: "blocked", tool: approval.tool, reason: evaluation.reason, approval_id: id }, true, TELL_MODEL.blocked(evaluation.reason));
       this.deps.approvals.complete(id, "blocked", result, this.now());
       if (operation) this.finishOperation(operation, "abandoned", result);
       log(`${approval.tool} approval ${id} by ${byName} -> blocked at execution: ${evaluation.reason}`);
@@ -327,7 +327,7 @@ export class Gate {
   private async getApprovalTool(args: Record<string, unknown>): Promise<CallToolResult> {
     const id = typeof args.approval_id === "string" ? args.approval_id : "";
     if (!this.getApproval(id)) {
-      return handrailResult({ status: "not_found", approval_id: id }, true);
+      return handrailResult({ status: "not_found", approval_id: id }, true, TELL_MODEL.notFound(id));
     }
     const waitMs = Math.min(Math.max(Number(args.wait_seconds) || 0, 0) * 1000, MAX_TOOL_WAIT_MS);
     return this.approvalResult(await this.waitForFinal(id, waitMs));
@@ -361,39 +361,23 @@ export class Gate {
       case "pending":
       case "executing":
         return handrailResult(
-          {
-            status: "pending_approval",
-            ...base,
-            reason: approval.evaluation.reason,
-            expires_at: new Date(approval.expiresAt).toISOString(),
-            next_step:
-              "NOT EXECUTED YET. A human must approve this action. Tell the user it is awaiting approval, " +
-              `then call handrail_get_approval with approval_id "${approval.id}" to check. Do not retry the original call.`,
-          },
+          { status: "pending_approval", ...base, reason: approval.evaluation.reason, expires_at: new Date(approval.expiresAt).toISOString() },
           false,
+          TELL_MODEL.pending(approval.id, approval.evaluation.reason, approval.expiresAt),
         );
       case "rejected":
         return handrailResult(
-          {
-            status: "rejected",
-            ...base,
-            decided_by: approval.decidedBy,
-            note: approval.note,
-            next_step: "A human rejected this action. It was not executed. Do not retry it.",
-          },
+          { status: "rejected", ...base, decided_by: approval.decidedBy, note: approval.note },
           true,
+          TELL_MODEL.rejected(approval.id, approval.note),
         );
       case "blocked":
         return approval.result as CallToolResult;
       case "expired":
         return handrailResult(
-          {
-            status: "expired",
-            ...base,
-            expired_at: new Date(approval.expiresAt).toISOString(),
-            next_step: "Nobody approved this action in time, so it expired. It was not sent to PayPal. Tell the user; ask again only if they still want it.",
-          },
+          { status: "expired", ...base, expired_at: new Date(approval.expiresAt).toISOString() },
           true,
+          TELL_MODEL.expired(approval.id),
         );
     }
   }
@@ -471,26 +455,55 @@ function duplicateResult(op: Operation): CallToolResult {
   const note =
     `[Handrail] Duplicate of an identical ${op.tool} call made at ${new Date(op.createdAt).toISOString()}. ` +
     "It was not sent to PayPal again; this is the original call's result.";
-  const original = op.result ?? handrailResult({ status: "in_progress", tool: op.tool }, false);
+  const original = op.result ?? handrailResult({ status: "in_progress", tool: op.tool }, false, TELL_MODEL.inProgress());
   return { ...original, content: [{ type: "text", text: note }, ...(original.content ?? [])] };
 }
 
 function unknownOutcomeResult(tool: string, err: Error, direct: boolean): CallToolResult {
   return handrailResult(
-    {
-      status: "outcome_unknown",
-      tool,
-      message: err instanceof NoResponseError ? err.message : `PayPal MCP call failed: ${err.message}`,
-      next_step: direct
-        ? "PayPal may or may not have run this. Retrying with identical arguments is safe: Handrail reuses the same PayPal-Request-Id, so PayPal will not run it twice."
-        : "PayPal may or may not have run this. Check with a read tool before retrying; a retry will be held for human approval.",
-    },
+    { status: "outcome_unknown", tool, message: err instanceof NoResponseError ? err.message : `PayPal MCP call failed: ${err.message}` },
     true,
+    TELL_MODEL.unknown(direct),
   );
 }
 
-function handrailResult(payload: Record<string, unknown>, isError: boolean): CallToolResult {
-  return { content: [{ type: "text", text: JSON.stringify({ handrail: payload }, null, 2) }], isError };
+/**
+ * What Handrail tells the model, in plain words, whenever it answers instead
+ * of PayPal. Written for real models: say what happened first, then exactly
+ * what to do and not do. The same text is the result's first content block
+ * (what a model reads) and `next_step` in the JSON block after it (for code).
+ * Shared by MCP, the REST tool-call API and the framework wrappers, which all
+ * pass results through unchanged.
+ */
+export const TELL_MODEL = {
+  pending: (id: string, reason: string, expiresAt: number) =>
+    `Not executed. Pending human approval (id ${id}). Do not retry this call. ` +
+    `Tell the user it is awaiting review; use handrail_get_approval with approval_id "${id}" to check later. ` +
+    `Why it was held: ${reason}. If nobody decides by ${new Date(expiresAt).toISOString()}, it expires and is not executed.`,
+  blocked: (reason: string) =>
+    `Not executed. Blocked by policy: ${reason}. Do not retry this call, and don't try to get around the limit (for example by splitting it into smaller calls). ` +
+    "Tell the user it was blocked and why.",
+  rejected: (id: string, note: string | null) =>
+    `Not executed. A person rejected this request (id ${id})${note ? `: "${note}"` : ""}. Do not retry this call. Tell the user it was rejected.`,
+  expired: (id: string) =>
+    `Not executed. The approval request (id ${id}) expired because nobody decided in time, so nothing was sent to PayPal. ` +
+    "Do not retry it automatically. Tell the user it expired; only ask again if they still want it.",
+  notFound: (id: string) => `There is no held call with approval_id "${id}". Check the id from the earlier result; do not retry the original call to find out.`,
+  inProgress: () => "This request is still being sent to PayPal. Do not retry it; check again shortly.",
+  unknown: (direct: boolean) =>
+    direct
+      ? "Outcome unknown: PayPal may or may not have done this. Retrying with exactly the same arguments is safe (Handrail makes sure PayPal runs it at most once)."
+      : "Outcome unknown: PayPal may or may not have done this. Check with a read tool before retrying; a retry will be held for human approval.",
+};
+
+function handrailResult(payload: Record<string, unknown>, isError: boolean, tellModel: string): CallToolResult {
+  return {
+    content: [
+      { type: "text", text: tellModel },
+      { type: "text", text: JSON.stringify({ handrail: { ...payload, next_step: tellModel } }, null, 2) },
+    ],
+    isError,
+  };
 }
 
 function describeAmount(facts: CallFacts): string {

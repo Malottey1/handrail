@@ -34,6 +34,18 @@ def text(payload: Any, is_error: bool = False) -> Dict[str, Any]:
     return {"content": [{"type": "text", "text": json.dumps(payload)}], **({"isError": True} if is_error else {})}
 
 
+def handrail_answer(payload: Dict[str, Any], tell_model: str, is_error: bool = False) -> Dict[str, Any]:
+    """How Handrail answers instead of PayPal: plain instructions for the model, then the JSON."""
+    body = {"handrail": {**payload, "next_step": tell_model}}
+    return {"content": [{"type": "text", "text": tell_model}, {"type": "text", "text": json.dumps(body, indent=2)}], **({"isError": True} if is_error else {})}
+
+
+PENDING = (
+    'Not executed. Pending human approval (id apr_0123456789abcdef0123). Do not retry this call. '
+    'Tell the user it is awaiting review; use handrail_get_approval with approval_id "apr_0123456789abcdef0123" to check later.'
+)
+
+
 class FakeHandrail:
     """Starts on a free port. ``requests`` records everything it received."""
 
@@ -74,11 +86,11 @@ class FakeHandrail:
                 if name == "create_refund":
                     value = float((args.get("amount") or {}).get("value", "0"))
                     if value > 100:
-                        self._send(200, text({"handrail": {"status": "pending_approval", "approval_id": "apr_0123456789abcdef0123", "tool": name, "next_step": "NOT EXECUTED YET. A human must approve this action."}}))
+                        self._send(200, handrail_answer({"status": "pending_approval", "approval_id": "apr_0123456789abcdef0123", "tool": name}, PENDING))
                     else:
                         self._send(200, text({"id": "REFUND1", "status": "COMPLETED", "amount": args.get("amount")}))
                 elif name == "handrail_get_approval":
-                    self._send(200, text({"handrail": {"status": "pending_approval", "approval_id": args.get("approval_id")}}))
+                    self._send(200, handrail_answer({"status": "pending_approval", "approval_id": args.get("approval_id")}, PENDING))
                 else:
                     self._send(200, text({"ok": True, "tool": name}))
 

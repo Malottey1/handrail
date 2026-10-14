@@ -25,6 +25,26 @@ class HandrailError(Exception):
         self.status = status
 
 
+def result_json(text: str) -> Any:
+    """The JSON in a tool's text result: PayPal's answer, or Handrail's own.
+
+    When Handrail answers instead of PayPal (held, blocked, expired…), the text
+    starts with plain instructions for the model and the JSON follows on its
+    own line. Returns None if there's no JSON.
+    """
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        pass
+    start = text.find("\n{") if isinstance(text, str) else -1
+    if start >= 0:
+        try:
+            return json.loads(text[start + 1 :])
+        except json.JSONDecodeError:
+            return None
+    return None
+
+
 class HandrailClient:
     def __init__(self, url: str, agent_key: str, timeout: float = DEFAULT_TIMEOUT) -> None:
         parsed = urllib.parse.urlparse(url or "")

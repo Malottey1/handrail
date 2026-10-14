@@ -55,4 +55,4 @@ export async function runTool(client: HandrailClient, name: string, args: unknow
 }
 
 export { ALL_TOOLS_ENABLED } from "./actions.js";
-export { HandrailClient, HandrailError } from "./client.js";
+export { HandrailClient, HandrailError, resultJson } from "./client.js";

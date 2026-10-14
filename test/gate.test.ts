@@ -86,13 +86,58 @@ const refund = (value?: string, key?: string) => ({
   ...(key ? { idempotency_key: key } : {}),
 });
 
+/** Handrail's JSON block (after the plain-words instruction for the model). */
 function handrailPayload(result: CallToolResult): Record<string, unknown> {
-  const first = result.content[0];
-  assert.equal(first?.type, "text");
-  return JSON.parse((first as { text: string }).text).handrail;
+  for (const block of result.content) {
+    if (block.type !== "text") continue;
+    try {
+      const parsed = JSON.parse(block.text);
+      if (parsed?.handrail) return parsed.handrail;
+    } catch {
+      // the plain-words line
+    }
+  }
+  assert.fail(`no Handrail JSON in ${JSON.stringify(result)}`);
 }
 
 const texts = (result: CallToolResult) => result.content.map((c) => (c as { text: string }).text);
+
+describe("gate: what the model is told", () => {
+  const first = (r: CallToolResult) => (r.content[0] as { text: string }).text;
+
+  it("held, blocked, rejected and expired results start with plain instructions, repeated as next_step", async () => {
+    const { gate, advance } = setup({ ttlMs: MINUTE });
+    const held = await gate.handle("create_refund", refund("250.00", "k1"));
+    const id = handrailPayload(held).approval_id as string;
+    assert.match(first(held), new RegExp(`^Not executed\\. Pending human approval \\(id ${id}\\)\\. Do not retry this call\\. Tell the user it is awaiting review; use handrail_get_approval with approval_id "${id}" to check later\\.`));
+    assert.match(first(held), /Why it was held: 250\.00 USD is over the 100\.00 USD ceiling/);
+    assert.equal(handrailPayload(held).next_step, first(held));
+    assert.equal(held.isError, false);
+
+    const blocked = await gate.handle("create_refund", refund("5000.00", "k2"));
+    assert.match(first(blocked), /^Not executed\. Blocked by policy: .*1000\.00 USD ceiling.*Do not retry this call, and don't try to get around the limit \(for example by splitting it into smaller calls\)\. Tell the user it was blocked and why\.$/);
+    assert.equal(blocked.isError, true);
+
+    const toReject = handrailPayload(await gate.handle("create_refund", refund("300.00", "k3"))).approval_id as string;
+    gate.reject(toReject, "Ada", "Not a real complaint");
+    const rejected = await gate.handle("handrail_get_approval", { approval_id: toReject });
+    assert.equal(first(rejected), `Not executed. A person rejected this request (id ${toReject}): "Not a real complaint". Do not retry this call. Tell the user it was rejected.`);
+
+    advance(MINUTE + 1);
+    const expired = await gate.handle("handrail_get_approval", { approval_id: id });
+    assert.match(first(expired), /^Not executed\. The approval request \(id .*\) expired because nobody decided in time, so nothing was sent to PayPal\. Do not retry it automatically\./);
+
+    const missing = await gate.handle("handrail_get_approval", { approval_id: "apr_nope" });
+    assert.match(first(missing), /no held call with approval_id "apr_nope"/);
+  });
+
+  it("a retry of a held call gets the same instructions, not a second approval", async () => {
+    const { gate } = setup();
+    const a = await gate.handle("create_refund", refund("250.00", "same"));
+    const b = await gate.handle("create_refund", refund("250.00", "same"));
+    assert.equal(first(b), first(a));
+  });
+});
 
 describe("gate: forwarding", () => {
   it("forwards MCP tools with the agent's arguments, minus idempotency_key", async () => {
@@ -446,7 +491,7 @@ describe("onHeld hook", () => {
     );
     const result = await gate.handle("create_refund", { capture_id: "CAP1", amount: { currency_code: "USD", value: "150.00" } });
     assert.equal(seen.length, 1);
-    assert.match((result.content[0] as { text: string }).text, /pending_approval/);
+    assert.match(JSON.stringify(result.content), /pending_approval/);
     assert.equal(gate.listApprovals("pending")[0]!.id, seen[0]);
   });
 });

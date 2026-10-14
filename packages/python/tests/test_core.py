@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from handrail_core import Configuration, Context, HandrailClient, HandrailError, is_tool_allowed, model_from_schema, to_plain, tool_specs
+from handrail_core import Configuration, Context, HandrailClient, HandrailError, is_tool_allowed, model_from_schema, result_json, to_plain, tool_specs
 from handrail_core.actions import TOOL_ACTIONS
 
 
@@ -39,7 +39,9 @@ def test_accepts_paypals_own_configuration_object():
 def test_calls_go_to_handrail_with_the_agent_key_and_nothing_else(handrail, key):
     client = HandrailClient(handrail.url + "/", key)
     assert client.run("create_refund", {"capture_id": "C1", "amount": {"currency_code": "USD", "value": "5.00"}}).startswith('{"id": "REFUND1"')
-    held = json.loads(client.run("create_refund", {"capture_id": "C1", "amount": {"currency_code": "USD", "value": "250.00"}}))
+    held_text = client.run("create_refund", {"capture_id": "C1", "amount": {"currency_code": "USD", "value": "250.00"}})
+    assert held_text.splitlines()[0].startswith("Not executed. Pending human approval")
+    held = result_json(held_text)
     assert held["handrail"]["status"] == "pending_approval"
     assert all(r["auth"] == f"Bearer {key}" for r in handrail.requests)
     assert [r["path"] for r in handrail.requests] == ["/v1/tools/call", "/v1/tools/call"]

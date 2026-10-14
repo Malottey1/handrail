@@ -25,6 +25,12 @@ type CallToolResult = {
     }>;
     isError?: boolean;
 };
+/**
+ * The JSON in a tool's text result: PayPal's answer, or Handrail's own. When
+ * Handrail answers instead of PayPal (held, blocked, expired…), the text starts
+ * with plain instructions for the model and the JSON follows on its own line.
+ */
+declare function resultJson(text: string): any;
 declare class HandrailClient {
     #private;
     readonly url: string;
@@ -106,4 +112,4 @@ declare class HandrailAgentToolkit {
     };
 }
 
-export { ALL_TOOLS_ENABLED, type Configuration, GET_APPROVAL_TOOL, HandrailAgentToolkit, HandrailClient, HandrailError, type HandrailToolkitOptions, HandrailWorkflows, isToolAllowed };
+export { ALL_TOOLS_ENABLED, type Configuration, GET_APPROVAL_TOOL, HandrailAgentToolkit, HandrailClient, HandrailError, type HandrailToolkitOptions, HandrailWorkflows, isToolAllowed, resultJson };

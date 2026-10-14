@@ -39,7 +39,7 @@ Change the import and the constructor. Keep everything else:
 - **The tools are Handrail's**, built at startup from `GET /v1/tools`. They have the same names, descriptions and argument schemas an MCP agent sees, so they always match what Handrail runs.
   - Each tool's argument schema becomes a Pydantic model for the framework, and arguments are validated before anything is sent.
   - `handrail_get_approval` is always included, so the agent can check on a held call.
-- **Held calls:** a held refund returns Handrail's JSON to the agent instead of PayPal's, e.g. `{"handrail": {"status": "pending_approval", "approval_id": "apr_…", "next_step": "NOT EXECUTED YET…"}}`. The agent reports it, and a person approves it in the dashboard.
+- **Held calls:** a held refund returns Handrail's answer instead of PayPal's. Plain instructions for the model come first ("Not executed. Pending human approval (id apr_…). Do not retry this call. Tell the user it is awaiting review; use handrail_get_approval …"), then the JSON (`{"handrail": {"status": "pending_approval", …}}`). `result_json(text)` returns that JSON for code. The agent reports the held call, and a person approves it in the dashboard.
   - Blocked and duplicate calls also come back as text.
   - Errors (Handrail unreachable, key refused) return as an error string, the way PayPal's toolkit returns its errors.
 - **Timeouts:** a held call waits about 20 seconds for a decision before Handrail answers. The default timeout is 60 s (`timeout=`).

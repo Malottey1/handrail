@@ -17,6 +17,7 @@ import { OperationStore } from "../../../src/idempotency.js";
 import type { PayPalRest } from "../../../src/paypal/rest.js";
 import { parsePolicy } from "../../../src/policy/load.js";
 import { handleToolApi } from "../../../src/tool-api.js";
+import { resultJson } from "../core/client.js";
 
 export const FIXTURE = JSON.parse(readFileSync(new URL("../../../test/fixtures/paypal-mcp-server.json", import.meta.url), "utf8"));
 
@@ -72,10 +73,6 @@ export async function startHandrail() {
 export const REFUNDS = { actions: { payments: { createRefund: true } }, context: { sandbox: true } };
 export const refund = (value: string) => ({ capture_id: "2GG27306VR5212345", amount: { currency_code: "USD", value } });
 export const status = (text: string) => {
-  try {
-    const body = JSON.parse(text);
-    return body.handrail?.status ?? body.status;
-  } catch {
-    return text;
-  }
+  const body = resultJson(text);
+  return body ? (body.handrail?.status ?? body.status) : text;
 };

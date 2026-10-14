@@ -3,10 +3,9 @@
     HANDRAIL_URL=http://127.0.0.1:8787 HANDRAIL_AGENT_KEY=hr_agent_... CAPTURE_ID=... python try_refunds.py
 """
 
-import json
 import os
 
-from handrail_langchain import Configuration, HandrailToolkit
+from handrail_langchain import Configuration, HandrailToolkit, result_json
 
 toolkit = HandrailToolkit(
     url=os.environ["HANDRAIL_URL"],
@@ -18,10 +17,7 @@ capture_id = os.environ["CAPTURE_ID"]
 
 for value in ("5.00", "150.00"):
     out = refund.invoke({"capture_id": capture_id, "amount": {"currency_code": "USD", "value": value}})
-    try:
-        body = json.loads(out)
-    except json.JSONDecodeError:
-        body = {}
+    body = result_json(out) or {}
     if "handrail" in body:
         print(f"{value} USD: {body['handrail']['status']} (approval {body['handrail'].get('approval_id')}). Approve it in Handrail's dashboard.")
     else:

@@ -165,8 +165,16 @@ export function parseForwardedCall(row: CallRow): ForwardedCall {
   let response: Record<string, any> | null = null;
   try {
     const result = JSON.parse(row.result_json ?? "null");
-    const text = result?.content?.[0]?.text;
-    if (typeof text === "string") response = JSON.parse(text);
+    // The first JSON block: PayPal's answer (Handrail's notes, when present, are plain text).
+    for (const block of result?.content ?? []) {
+      if (typeof block?.text !== "string") continue;
+      try {
+        response = JSON.parse(block.text);
+        break;
+      } catch {
+        // a plain-text note
+      }
+    }
   } catch {
     // Non-JSON result: nothing to match on beyond the arguments.
   }

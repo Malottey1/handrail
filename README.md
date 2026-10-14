@@ -137,8 +137,10 @@ curl -s http://127.0.0.1:8787/v1/tools/call -H "Authorization: Bearer $KEY" -H "
   -d '{"name": "create_refund", "arguments": {"capture_id": "2GG27306VR5212345", "amount": {"currency_code": "USD", "value": "5.00"}, "idempotency_key": "order-1042-refund"}}'
 # -> {"content":[{"type":"text","text":"{\"id\":\"…\",\"status\":\"COMPLETED\",…}"}]}
 
-# An over-limit one is held: Handrail answers with its status instead of PayPal's
-# -> {"content":[{"type":"text","text":"{\"handrail\":{\"status\":\"pending_approval\",\"approval_id\":\"apr_…\",…}}"}]}
+# An over-limit one is held: Handrail answers instead of PayPal, with plain instructions for the model first
+# -> {"content":[
+#      {"type":"text","text":"Not executed. Pending human approval (id apr_…). Do not retry this call. Tell the user it is awaiting review; use handrail_get_approval with approval_id \"apr_…\" to check later. Why it was held: …"},
+#      {"type":"text","text":"{\"handrail\":{\"status\":\"pending_approval\",\"approval_id\":\"apr_…\",…,\"next_step\":\"Not executed. …\"}}"}]}
 
 # Check on it later (or wait up to 25 s for a decision)
 curl -s http://127.0.0.1:8787/v1/tools/call -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
@@ -148,7 +150,7 @@ curl -s http://127.0.0.1:8787/v1/tools/call -H "Authorization: Bearer $KEY" -H "
 | Request | Answer |
 | --- | --- |
 | `GET /v1/tools` | `200 {"tools": [...]}` |
-| `POST /v1/tools/call` with `{"name", "arguments"}` | `200` with the MCP `CallToolResult` (`content`, `isError`). A held, blocked or duplicate call is still a 200; its text is Handrail's JSON (`pending_approval`, `blocked`…). |
+| `POST /v1/tools/call` with `{"name", "arguments"}` | `200` with the MCP `CallToolResult` (`content`, `isError`). A held, blocked or duplicate call is still a 200: Handrail answers instead of PayPal, with a plain-words instruction for the model first, then its JSON (`pending_approval`, `blocked`…). |
 | No, unknown or revoked key | `401` |
 | Malformed body | `400 {"error": "..."}` (nothing is called) |
 
