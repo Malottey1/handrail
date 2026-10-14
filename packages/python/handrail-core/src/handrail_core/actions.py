@@ -1,7 +1,10 @@
-# Which Configuration(actions=...) entries enable each tool. Taken from PayPal's
-# Agent Toolkit (paypal/agent-toolkit, Apache-2.0): typescript/src/shared/tools.ts,
-# plus update_shipment_tracking from python/paypal_agent_toolkit/shared/tools.py.
-# The same action names select the same tools as PayPal's PayPalToolkit.
+# Contains material from PayPal's Agent Toolkit (https://github.com/paypal/agent-toolkit, typescript/src/shared/tools.ts and python/paypal_agent_toolkit/shared/tools.py),
+# Copyright 2025 PayPal, licensed under the Apache License, Version 2.0
+# (https://www.apache.org/licenses/LICENSE-2.0; see LICENSES/Apache-2.0.txt in Handrail's repo).
+# Modified for Handrail, 2026: only the tool to action-name table is kept.
+
+# Which Configuration(actions=...) entries enable each tool. The same action names
+# select the same tools as PayPal's PayPalToolkit.
 
 TOOL_ACTIONS: dict[str, dict[str, dict[str, bool]]] = {
     "accept_dispute_claim": {"disputes": {"create": True}},

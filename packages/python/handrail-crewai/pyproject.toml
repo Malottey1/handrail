@@ -3,12 +3,13 @@ name = "handrail-crewai"
 version = "0.1.0"
 description = "PayPal's Agent Toolkit tools for CrewAI, with every call going through Handrail."
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dependencies = ["handrail-core>=0.1,<0.2", "crewai>=0.80"]
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]

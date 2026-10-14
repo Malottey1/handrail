@@ -1,3 +1,8 @@
+# Contains material from PayPal's Agent Toolkit (https://github.com/paypal/agent-toolkit, python/paypal_agent_toolkit/shared/configuration.py),
+# Copyright 2025 PayPal, licensed under the Apache License, Version 2.0
+# (https://www.apache.org/licenses/LICENSE-2.0; see LICENSES/Apache-2.0.txt in Handrail's repo).
+# Modified for Handrail, 2026: same shape; Context refuses access tokens and nothing in it is sent anywhere; is_tool_allowed takes a tool name and allows handrail_get_approval.
+
 """Configuration with the same shape as PayPal's Agent Toolkit, so existing code keeps working."""
 
 from __future__ import annotations

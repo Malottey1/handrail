@@ -1,5 +1,11 @@
 import { LanguageModelV1, Tool } from 'ai';
 
+/*!
+ * Contains material from PayPal's Agent Toolkit (https://github.com/paypal/agent-toolkit, typescript/src/shared/tools.ts),
+ * Copyright 2025 PayPal, licensed under the Apache License, Version 2.0
+ * (https://www.apache.org/licenses/LICENSE-2.0; see LICENSES/Apache-2.0.txt in Handrail's repo).
+ * Modified for Handrail, 2026: only the tool to action-name table is kept, plus ALL_TOOLS_ENABLED built from it.
+ */
 type Actions = {
     [product: string]: {
         [action: string]: boolean;
@@ -67,10 +73,11 @@ type HandrailToolkitOptions = {
 /** Same rule as PayPal's isToolAllowed: a tool is offered if any of its actions is enabled. */
 declare function isToolAllowed(name: string, configuration: Configuration): boolean;
 
-/**
- * Ported from PayPal's Agent Toolkit (paypal/agent-toolkit, Apache-2.0):
- * typescript/src/ai-sdk/workflows.ts. The same two workflows, using Handrail's
- * toolkit, so every PayPal call they make goes through Handrail.
+/*!
+ * Contains material from PayPal's Agent Toolkit (https://github.com/paypal/agent-toolkit, typescript/src/ai-sdk/workflows.ts),
+ * Copyright 2025 PayPal, licensed under the Apache License, Version 2.0
+ * (https://www.apache.org/licenses/LICENSE-2.0; see LICENSES/Apache-2.0.txt in Handrail's repo).
+ * Modified for Handrail, 2026: uses Handrail's toolkit and Handrail's create_order schema; log text shortened.
  */
 
 declare class HandrailWorkflows {

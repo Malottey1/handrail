@@ -1,3 +1,9 @@
+/*!
+ * Contains material from PayPal's Agent Toolkit (https://github.com/paypal/agent-toolkit, typescript/examples/langchain/index.ts),
+ * Copyright 2025 PayPal, licensed under the Apache License, Version 2.0
+ * (https://www.apache.org/licenses/LICENSE-2.0; see LICENSES/Apache-2.0.txt in Handrail's repo).
+ * Modified for Handrail, 2026: uses handrail-langchain (Handrail URL and agent key, not PayPal credentials) and asks for two refunds.
+ */
 import { config } from '@dotenvx/dotenvx';
 import { ChatOpenAI } from '@langchain/openai';
 import { HandrailAgentToolkit, ALL_TOOLS_ENABLED} from 'handrail-langchain';

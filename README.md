@@ -158,12 +158,20 @@ A held call waits about 20 seconds for a decision before answering, the same as 
 
 [`packages/python`](packages/python) has drop-in replacements for the Agent Toolkit's `PayPalToolkit`, in `handrail-langchain` and `handrail-crewai`. They give the agent the same tools and take the same `configuration`. They hold only an agent key and call Handrail's tool-call API; they never get PayPal credentials. Installation and details: [packages/python/README.md](packages/python/README.md).
 
-Here is PayPal's official LangChain example ([`examples/python/langchain`](examples/python/langchain)) switched to Handrail. The first and third hunks are the switch (the import, the two environment variables and the constructor). The others make the example demonstrate an allowed refund and a held one:
+Here is PayPal's official LangChain example ([`examples/python/langchain`](examples/python/langchain)) switched to Handrail. The import, the two environment variables and the constructor are the switch. The added refund action and prompt make the example demonstrate an allowed refund and a held one, and the header records that the file is a modified copy of PayPal's (Apache-2.0):
 
 ```diff
 --- paypal_app_agent.py (PayPal's example)
 +++ app_agent.py (through Handrail)
-@@ -4,13 +4,12 @@
+@@ -1,16 +1,20 @@
++# Contains material from PayPal's Agent Toolkit (https://github.com/paypal/agent-toolkit, python/examples/langchain/app_agent.py),
++# Copyright 2025 PayPal, licensed under the Apache License, Version 2.0
++# (https://www.apache.org/licenses/LICENSE-2.0; see LICENSES/Apache-2.0.txt in Handrail's repo).
++# Modified for Handrail, 2026: uses handrail_langchain (Handrail URL and agent key, not PayPal credentials), adds the refund action and asks for two refunds.
++
+ import os
+ from langchain.agents import initialize_agent, AgentType
+ from langchain_openai import ChatOpenAI 
  
  from dotenv import load_dotenv
  
@@ -180,7 +188,7 @@ Here is PayPal's official LangChain example ([`examples/python/langchain`](examp
  OPENAI_API_VERSION = "2024-02-15-preview"
  
  
-@@ -28,6 +27,9 @@
+@@ -28,6 +32,9 @@
              "create": True,
              "get": True,
              "capture": True,
@@ -190,7 +198,7 @@ Here is PayPal's official LangChain example ([`examples/python/langchain`](examp
          }
      },
      context=Context(
-@@ -37,7 +39,7 @@
+@@ -37,7 +44,7 @@
  
  
  # --- STEP 3: Build PayPal Toolkit ---
@@ -199,7 +207,7 @@ Here is PayPal's official LangChain example ([`examples/python/langchain`](examp
  tools = toolkit.get_tools()
  
  
-@@ -53,6 +55,10 @@
+@@ -53,6 +60,10 @@
  
  # --- STEP 5: Run Agent with Prompt ---
  if __name__ == "__main__":
@@ -224,12 +232,18 @@ Run `try_refunds.py` in the same folder to see the two refunds without an LLM. A
 
 [`packages/typescript`](packages/typescript) has drop-in replacements for `@paypal/agent-toolkit/ai-sdk` and `/langchain`: `handrail-ai-sdk` and `handrail-langchain`. They have the same synchronous constructor, `getTools()`, `ALL_TOOLS_ENABLED` and, for the AI SDK, workflows. They hold only an agent key and call Handrail's tool-call API. Installation and details: [packages/typescript/README.md](packages/typescript/README.md).
 
-PayPal's official examples ([`examples/typescript`](examples/typescript)) switched to Handrail. The import, the two config lines and the constructor are the switch; the prompt change makes the example demonstrate an allowed refund and a held one:
+PayPal's official examples ([`examples/typescript`](examples/typescript)) switched to Handrail. The import, the two config lines and the constructor are the switch. The prompt change makes the example demonstrate an allowed refund and a held one, and the header records that each file is a modified copy of PayPal's (Apache-2.0):
 
 ```diff
 --- ai-sdk/paypal-index.ts (PayPal's example)
 +++ ai-sdk/index.ts (through Handrail)
-@@ -1,7 +1,7 @@
+@@ -1,7 +1,13 @@
++/*!
++ * Contains material from PayPal's Agent Toolkit (https://github.com/paypal/agent-toolkit, typescript/examples/ai-sdk/index.ts),
++ * Copyright 2025 PayPal, licensed under the Apache License, Version 2.0
++ * (https://www.apache.org/licenses/LICENSE-2.0; see LICENSES/Apache-2.0.txt in Handrail's repo).
++ * Modified for Handrail, 2026: uses handrail-ai-sdk (Handrail URL and agent key, not PayPal credentials) and asks for two refunds.
++ */
  import {config} from '@dotenvx/dotenvx';
  import {openai} from '@ai-sdk/openai';
  import {generateText} from 'ai';
@@ -238,7 +252,7 @@ PayPal's official examples ([`examples/typescript`](examples/typescript)) switch
  
  // Get the env file path from an environment variable, with a default fallback
  const envFilePath = process.env.ENV_FILE_PATH || '.env';
-@@ -12,8 +12,8 @@
+@@ -12,8 +18,8 @@
   */
  
  const ppConfig = {
@@ -249,7 +263,7 @@ PayPal's official examples ([`examples/typescript`](examples/typescript)) switch
      configuration: {
          actions: ALL_TOOLS_ENABLED
      }
-@@ -21,11 +21,11 @@
+@@ -21,11 +27,11 @@
  /*
   * This holds all the tools that use PayPal functionality
   */
@@ -263,7 +277,7 @@ PayPal's official examples ([`examples/typescript`](examples/typescript)) switch
  
  /*
   * This is the merchant's typical use case. This stays the same for most requests.
-@@ -50,7 +50,7 @@
+@@ -50,7 +56,7 @@
          model: openai('gpt-4o'),
          tools: paypalToolkit.getTools(),
          maxSteps: 10,
@@ -277,7 +291,13 @@ PayPal's official examples ([`examples/typescript`](examples/typescript)) switch
 ```diff
 --- langchain/paypal-index.ts (PayPal's example)
 +++ langchain/index.ts (through Handrail)
-@@ -1,6 +1,6 @@
+@@ -1,6 +1,12 @@
++/*!
++ * Contains material from PayPal's Agent Toolkit (https://github.com/paypal/agent-toolkit, typescript/examples/langchain/index.ts),
++ * Copyright 2025 PayPal, licensed under the Apache License, Version 2.0
++ * (https://www.apache.org/licenses/LICENSE-2.0; see LICENSES/Apache-2.0.txt in Handrail's repo).
++ * Modified for Handrail, 2026: uses handrail-langchain (Handrail URL and agent key, not PayPal credentials) and asks for two refunds.
++ */
  import { config } from '@dotenvx/dotenvx';
  import { ChatOpenAI } from '@langchain/openai';
 -import { PayPalAgentToolkit, ALL_TOOLS_ENABLED} from '@paypal/agent-toolkit/langchain';
@@ -285,7 +305,7 @@ PayPal's official examples ([`examples/typescript`](examples/typescript)) switch
  import { createReactAgent } from '@langchain/langgraph/prebuilt';
  
  const envFilePath = process.env.ENV_FILE_PATH || '.env';
-@@ -12,14 +12,14 @@
+@@ -12,14 +18,14 @@
    });
  
  const ppConfig = {
@@ -303,7 +323,7 @@ PayPal's official examples ([`examples/typescript`](examples/typescript)) switch
  let tools = paypalToolkit.getTools();
  
  (async () => {
-@@ -32,7 +32,7 @@
+@@ -32,7 +38,7 @@
          {
              messages: [{
                  role: "user",
@@ -349,4 +369,10 @@ Decide held calls in the dashboard, or with `npm run approvals -- approve <id>`.
 
 ## License
 
-MIT
+Handrail is MIT-licensed ([LICENSE](LICENSE)), **except** the files that contain material from PayPal's [Agent Toolkit](https://github.com/paypal/agent-toolkit), which stay under the Apache License 2.0 ([LICENSES/Apache-2.0.txt](LICENSES/Apache-2.0.txt)). They are:
+- the copied and modified examples in `examples/`
+- the ported AI SDK workflows
+- the tool and action tables in the wrapper packages
+- the recorded PayPal tool list used in tests
+
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) lists each one and what changed. Each modified file also says so in its header. The wrapper packages that include this material declare `MIT AND Apache-2.0` and ship both licenses.

@@ -1,6 +1,12 @@
 import { BaseToolkit, StructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
 
+/*!
+ * Contains material from PayPal's Agent Toolkit (https://github.com/paypal/agent-toolkit, typescript/src/shared/tools.ts),
+ * Copyright 2025 PayPal, licensed under the Apache License, Version 2.0
+ * (https://www.apache.org/licenses/LICENSE-2.0; see LICENSES/Apache-2.0.txt in Handrail's repo).
+ * Modified for Handrail, 2026: only the tool to action-name table is kept, plus ALL_TOOLS_ENABLED built from it.
+ */
 type Actions = {
     [product: string]: {
         [action: string]: boolean;

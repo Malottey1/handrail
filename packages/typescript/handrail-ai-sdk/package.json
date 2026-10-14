@@ -2,12 +2,29 @@
   "name": "handrail-ai-sdk",
   "version": "0.1.0",
   "description": "PayPal's Agent Toolkit tools for the Vercel AI SDK, with every call going through Handrail.",
-  "license": "MIT",
+  "license": "MIT AND Apache-2.0",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js", "require": "./dist/index.cjs" } },
-  "files": ["dist", "README.md"],
-  "scripts": { "build": "tsup src/index.ts --format esm,cjs --dts --clean --target es2022" },
-  "peerDependencies": { "ai": "^4.0.0", "zod": "^3.23.0" }
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "LICENSE-APACHE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts --clean --target es2022"
+  },
+  "peerDependencies": {
+    "ai": "^4.0.0",
+    "zod": "^3.23.0"
+  }
 }

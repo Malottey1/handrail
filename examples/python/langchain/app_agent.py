@@ -1,3 +1,8 @@
+# Contains material from PayPal's Agent Toolkit (https://github.com/paypal/agent-toolkit, python/examples/langchain/app_agent.py),
+# Copyright 2025 PayPal, licensed under the Apache License, Version 2.0
+# (https://www.apache.org/licenses/LICENSE-2.0; see LICENSES/Apache-2.0.txt in Handrail's repo).
+# Modified for Handrail, 2026: uses handrail_langchain (Handrail URL and agent key, not PayPal credentials), adds the refund action and asks for two refunds.
+
 import os
 from langchain.agents import initialize_agent, AgentType
 from langchain_openai import ChatOpenAI 

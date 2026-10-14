@@ -1,7 +1,8 @@
-/**
- * Ported from PayPal's Agent Toolkit (paypal/agent-toolkit, Apache-2.0):
- * typescript/src/ai-sdk/workflows.ts. The same two workflows, using Handrail's
- * toolkit, so every PayPal call they make goes through Handrail.
+/*!
+ * Contains material from PayPal's Agent Toolkit (https://github.com/paypal/agent-toolkit, typescript/src/ai-sdk/workflows.ts),
+ * Copyright 2025 PayPal, licensed under the Apache License, Version 2.0
+ * (https://www.apache.org/licenses/LICENSE-2.0; see LICENSES/Apache-2.0.txt in Handrail's repo).
+ * Modified for Handrail, 2026: uses Handrail's toolkit and Handrail's create_order schema; log text shortened.
  */
 import { generateObject, generateText, type LanguageModelV1 } from "ai";
 import { HandrailAgentToolkit } from "./index.js";
