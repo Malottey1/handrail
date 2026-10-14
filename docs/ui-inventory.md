@@ -1,6 +1,13 @@
 # Handrail UI inventory
 
-A complete description of the dashboard as of Oct 13, 2026 (commit after `6cda5b3`), for planning a redesign. Nothing here changes code.
+A complete description of the UI as of Oct 14, 2026 (commit `8beb963`), for planning a redesign. Nothing here changes code. Regenerated from scratch: every screen was re-checked and every screenshot retaken.
+
+**[New]** marks what's new or changed since the previous inventory (Oct 13, commit `c31c97d`). The new items are:
+- the homepage: nav links, hero wording, "What Handrail does", "Works with the agent you have" with framework diff tabs, and the "Try the demo" band (§2.1);
+- the plain-words instruction for the model, now shown in the Activity drawer's "Result returned to the agent" (§5);
+- new shared pieces and inconsistencies (§16–18).
+
+The rest of the dashboard (Setup, connect guide, alert settings, Team & keys, demo panel) is unchanged since then. It's re-described here in full.
 
 **Screenshots** are in [`docs/ui-screens/`](ui-screens/), light mode unless noted. They show the real built UI (`web/dist`) with **made-up data**: the `/api` responses were replaced by fixtures in the browser, so every name, email (`example.com`), PayPal id and hash is invented. Nothing comes from a real sandbox account.
 
@@ -53,7 +60,7 @@ Source: `web/src/` (React 19 + AG Grid 34, no UI framework). Styles are one file
 
 ### 2.1 Home: `/`
 
-![Home](ui-screens/01-home.png) · Phone: [23-phone-home.png](ui-screens/23-phone-home.png)
+![Home](ui-screens/01-home.png) · Framework tab: [01b-home-connect-ai-sdk-tab.png](ui-screens/01b-home-connect-ai-sdk-tab.png) · Phone: [23-phone-home.png](ui-screens/23-phone-home.png)
 
 - **Reached by:** opening the site; the logo/brand in any header; any unknown path; "Sign out" (navigates here).
 - **Who:** everyone. Signed-in users see "Open the dashboard" / "Dashboard" instead of the sign-in actions.
@@ -62,12 +69,12 @@ Source: `web/src/` (React 19 + AG Grid 34, no UI framework). Styles are one file
 
 1. **Nav bar** (`.home-nav`):
    - Left: logo (28 px) + "Handrail".
-   - Middle: in-page links "The problem" (#problem) and "How it works" (#how).
+   - Middle: in-page links "The problem" (#problem), **[New]** "What it does" (#features) and **[New]** "Connect your agent" (#connect). "How it works" no longer has a nav link, though the section is still there.
    - Right: theme toggle (☾/☀), plus "Sign in" (secondary, → /login) or, when signed in, "Dashboard" (→ /app).
 2. **Hero** (two columns):
    - Kicker: "A DROP-IN SAFETY LAYER FOR PAYPAL'S AGENT TOOLKIT" (green, uppercase).
    - H1: "Let your agent work with PayPal, without handing it the keys to the till."
-   - Lede: "Handrail sits between your AI agent and PayPal. Point an existing Agent Toolkit agent at it and change no code: every refund, dispute concession and cancellation is checked against your limits, sent to a person when it needs one, executed once, and written to an audit trail you can verify."
+   - **[New]** Lede: "Handrail sits between your AI agent and PayPal. Point an existing Agent Toolkit agent at it, over MCP or from LangChain, CrewAI or the Vercel AI SDK. Every refund, dispute concession and cancellation is checked against your limits, sent to a person when it needs one, executed once, and written to an audit trail you can verify."
    - Actions, signed out:
      - "Try the demo" (primary, large; only when demo access is on; busy state "Opening the demo…")
      - "Sign in" (secondary; primary if the demo is off). It reads "Set up Handrail" and goes to /signup when no account exists yet.
@@ -80,24 +87,46 @@ Source: `web/src/` (React 19 + AG Grid 34, no UI framework). Styles are one file
      - "✦ AI BRIEF": "The agent wants to refund 250.00 USD on one capture. Check that the customer asked for it before approving."
      - Fake "Reject" / "Approve" buttons (spans)
      - A green top border
-3. **"The problem"** (#problem). Lede: "Connect an agent to PayPal's toolkit and it can move money on its own. The toolkit lets you switch whole tools on or off, and that's the only control there is." Then 6 tiles (3×2 grid):
-   - "Refunds go straight out." A confused or manipulated agent can refund any amount, as often as it likes.
-   - "Disputes get conceded." One `accept_dispute_claim` call gives the money back to the buyer, and no one is asked first.
-   - "Cancellations are instant." Invoices, subscriptions and recurring billing can be cancelled in a single call.
-   - "No approvals or limits." There's no per-call ceiling, no daily cap, and no way to have a person sign off on a large refund.
-   - "Retries can pay out twice." PayPal's idempotency id is set once per client, not per call, so a retried refund can run again.
-   - "No record." Nothing shows what the agent asked for, who allowed it, or whether PayPal's events match.
+3. **"The problem"** (#problem). Lede: "Connect an agent to PayPal's toolkit and it can move money on its own. The toolkit lets you switch whole tools on or off, and that's the only control there is." Then 6 tiles (3×2 grid, grey `surface-2` fill):
+   - "Refunds go straight out."
+   - "Disputes get conceded." (with `accept_dispute_claim` in mono)
+   - "Cancellations are instant."
+   - "No approvals or limits."
+   - "Retries can pay out twice."
+   - "No record."
 4. **"How it works"** (#how). Three numbered steps in green circles:
    - (1) "Point your agent at Handrail"
    - (2) "Every money-moving call meets your rules"
    - (3) "People decide, PayPal executes once, everything is recorded"
    - Each has a paragraph; see the screenshot.
-5. **CTA band**: H2 "See it on the sandbox", "Approve a held refund, watch a retry storm come to nothing, and check the audit log for yourself.", then the same actions as the hero.
-6. **Footer**: left "Handrail · Built for PayPal's "Build What's Next with PayPal and AI" hackathon", right "Sandbox only. AI explains; your rules decide."
+5. **[New] "What Handrail does"** (#features). Lede: "Rules decide. People approve. AI only explains." Then 6 feature cards (3×2 grid on white surface, shadow). Each has a 34 px icon tile in brand tint, with a text glyph:
+
+   | Glyph | Card title | Text |
+   | --- | --- | --- |
+   | Σ | "Running totals stop split refunds" | Limits count what's already been refunded on the same payment, order, customer or agent, including requests still waiting; three small refunds that add up get held. |
+   | ✓ | "Facts apart from claims" | Approval cards show what PayPal confirmed separately from what the agent says; the AI brief sticks to the confirmed facts. |
+   | ! | "Bypasses get noticed" | Refunds, dispute concessions or cancellations that didn't go through Handrail are flagged and alerted. |
+   | ✉ | "Alerts, and calls that expire" | Email or Slack with a link; nothing can be approved from the message; undecided calls expire. |
+   | 1× | "Retries never pay twice" | A per-request idempotency key; held calls tell the agent not to retry. |
+   | # | "A record you can check" | Hash-chained log; webhooks matched back to calls. |
+
+6. **[New] "Works with the agent you have"** (#connect).
+   - Lede: "No new SDK to learn. Handrail offers the same PayPal tools, so you change where the agent connects and nothing else. The agent gets a Handrail key; your PayPal credentials stay in Handrail."
+   - Two cards side by side (40/60 split):
+     - **"MCP agents"**: "Point the agent's PayPal MCP server at Handrail.", followed by a JSON code block (`mcpServers.paypal` with `url` "https://your-handrail.example.com/mcp" and an `Authorization: Bearer hr_agent_…` header).
+     - **"Framework agents"**: "Swap PayPal's toolkit for Handrail's: the import and the constructor change, the tools stay the same."
+   - **Tabs** (pill buttons, `role=tab`): "LangChain (Python)" (default), "CrewAI", "Vercel AI SDK", "LangChain JS". The selected tab is filled green.
+   - **Diff block:** a monospace before/after for the selected tab. Removed lines (−, red on `--bad-bg`) are PayPal's import and constructor; added lines (+, green on `--brand-tint`) are Handrail's; one unchanged context line follows (`tools = toolkit.get_tools()`, `await generateText(…)`, etc.).
+   - Long lines scroll sideways inside the block.
+7. **[New] CTA band "Try the demo"** (was "See it on the sandbox"):
+   - "Sign in as an approver on PayPal's sandbox and run the demo agent. A small refund goes through. A large one waits for you, with an AI brief. Its retry is caught. Three small refunds that add up too much are held. Approve or reject, then check the record."
+   - The same actions as the hero.
+8. **Footer**: left "Handrail · Built for PayPal's "Build What's Next with PayPal and AI" hackathon", right "Sandbox only. AI explains; your rules decide."
 
 **States:**
 - Demo busy: the button is disabled and reads "Opening the demo…".
 - Demo error: red text under the actions.
+- **[New]** The selected framework tab is local state; it resets on reload.
 
 ### 2.2 Sign in: `/login`
 
@@ -287,7 +316,7 @@ The card has an amber outline (`.approval-card` border in `--warn`). A focused c
 5. Key–value list: time, agent ("Not recorded (before agent keys)" when missing), tool, PayPal-Request-Id, approval, took (ms), and "amount from" (arguments/lookup/none).
 6. "RULES THAT FIRED": a pill, the rule id and the reason.
 7. "AGENT'S ARGUMENTS": a JSON block.
-8. "RESULT RETURNED TO THE AGENT": a JSON block.
+8. "RESULT RETURNED TO THE AGENT": a JSON block. **[New]** When Handrail answered instead of PayPal (held, blocked, expired…), its first content block is the plain-words instruction for the model ("Not executed. Pending human approval (id …). Do not retry this call. …"), and the second is Handrail's JSON, whose `next_step` repeats the same text.
 9. "AUDIT LOG ENTRIES": an ordered list of "#seq, kind, time, hash (16 chars)…". It shows "This call predates the audit log." when there are none.
 
 **Unattributed drawer**, title "Refund $60.00":
@@ -547,7 +576,7 @@ Breakpoints are in `styles.css`.
 | --- | --- |
 | ≤ 1400 px (viewport, in JS) | Activity hides the PayPal-Request-Id column. |
 | ≤ 1100 px | Stats go from 6 to 3 columns. Approvals goes to one column, with "Recently decided" moving below the cards. |
-| ≤ 900 px | Home hero goes to one column (the card drops below the copy); problem tiles and steps go to one column. Demo steps go to one column, and the demo panel header stacks (button under the text). |
+| ≤ 900 px | Home hero goes to one column (the card drops below the copy); problem tiles and steps go to one column. **[New]** The feature cards and the two "Works with the agent you have" cards go to one column, and the framework tabs wrap. Demo steps go to one column, and the demo panel header stacks (button under the text). |
 | ≤ 640 px | **Dashboard:** the top bar wraps; integrity meta (entries · hash) is hidden; the user's name and role badge are hidden (initials only); stats go to 2 columns; tabs scroll sideways (`overflow-x: auto`, no fade or indicator, so the last tabs are cut off — see [22-phone-approvals.png](ui-screens/22-phone-approvals.png)); main padding goes to 16 px; cards go to one column; key–value rows stack (label above value); policy rules stack; the alerts chip gets smaller. **Home:** the nav links "The problem" and "How it works" are hidden, with 16 px gutters. **Auth pages:** the top bar uses 16 px gutters. **Team:** the secret box stacks its input and Copy button. **Setup:** checklist buttons move under the text. |
 | Drawers | Width is `min(620px, 100%)`, so full width on phones. |
 | Grids | AG Grid keeps its columns; on phones the grids scroll sideways inside their container. |
@@ -574,7 +603,9 @@ There's no hamburger menu and no bottom navigation, and nothing besides the PayP
 
 ```
 / (Home)
-├── #problem, #how ................ in-page anchors
+├── #problem, #features, #connect ... nav anchors  ([New] #features, #connect)
+├── #how .......................... section without a nav link ([New] link removed)
+├── Framework tabs ................ LangChain (Python) / CrewAI / Vercel AI SDK / LangChain JS ([New], in-page)
 ├── Try the demo ───────────────────────────────┐ (demo access on)
 ├── Sign in / Set up Handrail → /login or /signup
 │
@@ -650,6 +681,8 @@ AG Grid (`grid.ts`):
 
 The alert email (HTML) hard-codes #127842 for its button and #56605a for labels.
 
+**[New] Homepage code blocks** use tokens only: `--surface-2` background, `--mono` at 12.5 px with line-height 1.6. Added diff lines are `--brand` on `--brand-tint`, removed ones `--bad` on `--bad-bg`. The selected framework tab is `--brand` with `--on-brand` text. Feature icon tiles are `--brand` on `--brand-tint`.
+
 ### Typography
 - **Families:**
   - `--font`: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif.
@@ -697,6 +730,8 @@ The alert email (HTML) hard-codes #127842 for its button and #56605a for labels.
 | `SecretBox` | views/Team.tsx | Invite link and new agent key (Team & keys) |
 | `AuthShell` | views/AuthPages.tsx | Sign in, Sign up variants |
 | `HeroCard` | views/Home.tsx | Home hero only |
+| **[New]** `FrameworkDiffs` (tabs + diff block), `FEATURES`, `MCP_SNIPPET` | views/Home.tsx | Home "Works with the agent you have" and "What Handrail does" |
+| **[New]** `.feature`, `.feature-icon`, `.connect-card`, `.code`, `.code-diff` (`.add`/`.del`), `.diff-tab` (CSS patterns) | styles.css | Homepage only so far |
 | `Stat`, `IntegrityBadge`, `AlertsChip` | App.tsx | Dashboard shell |
 | AG Grid + `useGridTheme` | grid.ts | Activity, Webhooks, Audit log |
 | `.kv` key–value list (CSS pattern) | styles.css | Approval cards, drawers, Setup, Team alerts |
@@ -746,3 +781,14 @@ Listed as found, not fixed.
 23. **Real-world identity mixes.** The People table offers a role select for the demo account, while the demo's own Account page says nothing about it can change. The demo account also appears in the real team's People list.
 24. **Spacing glitch.** In the Activity call drawer, the "Verified with PayPal" box sits directly against the key–value list below it, with no gap ([09](ui-screens/09-activity-call-drawer.png)).
 25. **The agent keys help shows the browser's origin.** It uses `location.origin` for the MCP URL, while the Setup tab shows the server's configured public URL. Behind a proxy or a different host, the two can differ.
+
+**[New] Homepage**
+
+26. **Messaging repeats three times.** The problem tiles, the "How it works" steps and the new feature cards repeat each other: retries are covered in all three, and the record in two.
+27. **"How it works" has no nav link.** The nav now links "What it does" and "Connect your agent", but not "How it works", which still sits between them on the page.
+28. **Two kinds of MCP config.** The homepage shows an HTTP config (`url` + `headers`), while the README shows a stdio one (`command`/`args`). Neither says which MCP clients accept which shape.
+29. **The homepage diffs are abbreviated.** They use short forms (`{ clientId, clientSecret, … }`, `Agent(role=…, …)`) that differ from the full diffs of PayPal's examples in the README.
+30. **Wide code is cut off on desktop.** Code blocks scroll sideways, so on a 1280 px screen the long import and constructor lines are cut mid-line, with nothing to say there's more ([01b](ui-screens/01b-home-connect-ai-sdk-tab.png)).
+31. **Ad hoc icons.** Feature icons are text glyphs (Σ ✓ ! ✉ 1× #) in tinted tiles; the dashboard has no icon set. "✓" and "!" also mean "checked" and "needs attention" in the Setup checklist.
+32. **Hero vs. cards.** The hero card still shows the old money format ("250.00 USD") and no "Verified with PayPal" or "Agent says" sections, so it no longer looks like a real approval card (compare [06](ui-screens/06-approvals-admin.png)).
+33. **The agent's result appears in two forms.** In the Activity drawer, "Result returned to the agent" shows the raw result: a plain-text block, then a JSON string inside JSON. The plain-words instruction appears twice (as `text` and as `next_step`).
