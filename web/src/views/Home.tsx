@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { AuthState, Session } from "../api";
 import { Logo, Pill, ThemeToggle } from "../components";
 import { link } from "../router";
@@ -33,7 +34,8 @@ export function HomePage({ auth, session, onSignedIn }: { auth: AuthState; sessi
         </a>
         <nav className="home-links">
           <a href="#problem">The problem</a>
-          <a href="#how">How it works</a>
+          <a href="#features">What it does</a>
+          <a href="#connect">Connect your agent</a>
         </nav>
         <div className="home-nav-actions">
           <ThemeToggle />
@@ -54,9 +56,9 @@ export function HomePage({ auth, session, onSignedIn }: { auth: AuthState; sessi
           <p className="kicker">A drop-in safety layer for PayPal's Agent Toolkit</p>
           <h1>Let your agent work with PayPal, without handing it the keys to the till.</h1>
           <p className="hero-lede">
-            Handrail sits between your AI agent and PayPal. Point an existing Agent Toolkit agent at it and change no code: every refund,
-            dispute concession and cancellation is checked against your limits, sent to a person when it needs one, executed once, and
-            written to an audit trail you can verify.
+            Handrail sits between your AI agent and PayPal. Point an existing Agent Toolkit agent at it, over MCP or from LangChain,
+            CrewAI or the Vercel AI SDK. Every refund, dispute concession and cancellation is checked against your limits, sent to a
+            person when it needs one, executed once, and written to an audit trail you can verify.
           </p>
           <div className="hero-actions">{actions}</div>
           {demo.error && <p className="error">{demo.error}</p>}
@@ -129,9 +131,44 @@ export function HomePage({ auth, session, onSignedIn }: { auth: AuthState; sessi
         </ol>
       </section>
 
+      <section className="home-section" id="features">
+        <h2>What Handrail does</h2>
+        <p className="section-lede">Rules decide. People approve. AI only explains.</p>
+        <ul className="feature-grid">
+          {FEATURES.map((f) => (
+            <li key={f.title} className="feature">
+              <span className="feature-icon" aria-hidden="true">
+                {f.icon}
+              </span>
+              <h3>{f.title}</h3>
+              <p>{f.body}</p>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section className="home-section" id="connect">
+        <h2>Works with the agent you have</h2>
+        <p className="section-lede">
+          No new SDK to learn. Handrail offers the same PayPal tools, so you change where the agent connects and nothing else. The
+          agent gets a Handrail key; your PayPal credentials stay in Handrail.
+        </p>
+        <div className="connect-grid">
+          <div className="connect-card">
+            <h3>MCP agents</h3>
+            <p>Point the agent's PayPal MCP server at Handrail.</p>
+            <pre className="code">{MCP_SNIPPET}</pre>
+          </div>
+          <FrameworkDiffs />
+        </div>
+      </section>
+
       <section className="home-cta">
-        <h2>See it on the sandbox</h2>
-        <p>Approve a held refund, watch a retry storm come to nothing, and check the audit log for yourself.</p>
+        <h2>Try the demo</h2>
+        <p>
+          Sign in as an approver on PayPal's sandbox and run the demo agent. A small refund goes through. A large one waits for you, with
+          an AI brief. Its retry is caught. Three small refunds that add up too much are held. Approve or reject, then check the record.
+        </p>
         <div className="hero-actions">{actions}</div>
       </section>
 
@@ -139,6 +176,122 @@ export function HomePage({ auth, session, onSignedIn }: { auth: AuthState; sessi
         <span>Handrail · Built for PayPal's “Build What's Next with PayPal and AI” hackathon</span>
         <span>Sandbox only. AI explains; your rules decide.</span>
       </footer>
+    </div>
+  );
+}
+
+const FEATURES = [
+  {
+    icon: "Σ",
+    title: "Running totals stop split refunds",
+    body: "Limits count what's already been refunded on the same payment, order, customer or agent, including requests still waiting for approval. Three small refunds that add up to a big one get held.",
+  },
+  {
+    icon: "✓",
+    title: "Facts apart from claims",
+    body: "Approval cards show what PayPal confirmed (what was paid, what's been refunded, who paid, dispute deadlines) separately from what the agent says. The AI brief sticks to the confirmed facts.",
+  },
+  {
+    icon: "!",
+    title: "Bypasses get noticed",
+    body: "If PayPal reports a refund, dispute concession or cancellation that didn't go through Handrail, it's flagged and you're alerted. That's how you find an agent that still has its own PayPal keys.",
+  },
+  {
+    icon: "✉",
+    title: "Alerts, and calls that expire",
+    body: "Approvers get an email or Slack message with a link to the held call. Nothing can be approved from the message itself. A call nobody decides expires and is never sent.",
+  },
+  {
+    icon: "1×",
+    title: "Retries never pay twice",
+    body: "Each request gets its own PayPal idempotency key, so a timed-out refund that the agent retries runs at most once. Held calls tell the agent not to retry.",
+  },
+  {
+    icon: "#",
+    title: "A record you can check",
+    body: "Every decision, approval and PayPal response is written to a hash-chained log, and PayPal's webhooks are matched back to the call that caused them.",
+  },
+];
+
+const MCP_SNIPPET = `{
+  "mcpServers": {
+    "paypal": {
+      "url": "https://your-handrail.example.com/mcp",
+      "headers": { "Authorization": "Bearer hr_agent_…" }
+    }
+  }
+}`;
+
+const DIFFS: Array<{ label: string; lines: Array<[" " | "-" | "+", string]> }> = [
+  {
+    label: "LangChain (Python)",
+    lines: [
+      ["-", "from paypal_agent_toolkit.langchain.toolkit import PayPalToolkit"],
+      ["+", "from handrail_langchain import HandrailToolkit"],
+      [" ", ""],
+      ["-", "toolkit = PayPalToolkit(client_id=PAYPAL_CLIENT_ID, secret=PAYPAL_CLIENT_SECRET, configuration=configuration)"],
+      ["+", "toolkit = HandrailToolkit(url=HANDRAIL_URL, agent_key=HANDRAIL_AGENT_KEY, configuration=configuration)"],
+      [" ", "tools = toolkit.get_tools()"],
+    ],
+  },
+  {
+    label: "CrewAI",
+    lines: [
+      ["-", "from paypal_agent_toolkit.crewai.toolkit import PayPalToolkit"],
+      ["+", "from handrail_crewai import HandrailToolkit"],
+      [" ", ""],
+      ["-", "toolkit = PayPalToolkit(client_id=PAYPAL_CLIENT_ID, secret=PAYPAL_SECRET, configuration=configuration)"],
+      ["+", "toolkit = HandrailToolkit(url=HANDRAIL_URL, agent_key=HANDRAIL_AGENT_KEY, configuration=configuration)"],
+      [" ", "agent = Agent(role=\"PayPal Assistant\", tools=toolkit.get_tools(), …)"],
+    ],
+  },
+  {
+    label: "Vercel AI SDK",
+    lines: [
+      ["-", "import { PayPalAgentToolkit, ALL_TOOLS_ENABLED } from '@paypal/agent-toolkit/ai-sdk';"],
+      ["+", "import { HandrailAgentToolkit, ALL_TOOLS_ENABLED } from 'handrail-ai-sdk';"],
+      [" ", ""],
+      ["-", "const toolkit = new PayPalAgentToolkit({ clientId, clientSecret, configuration: { actions: ALL_TOOLS_ENABLED } });"],
+      ["+", "const toolkit = new HandrailAgentToolkit({ url, agentKey, configuration: { actions: ALL_TOOLS_ENABLED } });"],
+      [" ", "await generateText({ model, tools: toolkit.getTools(), maxSteps: 10, prompt });"],
+    ],
+  },
+  {
+    label: "LangChain JS",
+    lines: [
+      ["-", "import { PayPalAgentToolkit, ALL_TOOLS_ENABLED } from '@paypal/agent-toolkit/langchain';"],
+      ["+", "import { HandrailAgentToolkit, ALL_TOOLS_ENABLED } from 'handrail-langchain';"],
+      [" ", ""],
+      ["-", "const toolkit = new PayPalAgentToolkit({ clientId, clientSecret, configuration: { actions: ALL_TOOLS_ENABLED } });"],
+      ["+", "const toolkit = new HandrailAgentToolkit({ url, agentKey, configuration: { actions: ALL_TOOLS_ENABLED } });"],
+      [" ", "const agent = createReactAgent({ llm, tools: toolkit.getTools() });"],
+    ],
+  },
+];
+
+/** Before/after for framework agents: the import and the constructor change, nothing else. */
+function FrameworkDiffs() {
+  const [active, setActive] = useState(0);
+  const diff = DIFFS[active]!;
+  return (
+    <div className="connect-card">
+      <h3>Framework agents</h3>
+      <p>Swap PayPal's toolkit for Handrail's: the import and the constructor change, the tools stay the same.</p>
+      <div className="diff-tabs" role="tablist" aria-label="Framework">
+        {DIFFS.map((d, i) => (
+          <button key={d.label} role="tab" aria-selected={i === active} className={`diff-tab ${i === active ? "active" : ""}`} onClick={() => setActive(i)}>
+            {d.label}
+          </button>
+        ))}
+      </div>
+      <pre className="code code-diff" aria-label={`${diff.label}: before and after`}>
+        {diff.lines.map(([sign, text], i) => (
+          <span key={i} className={sign === "+" ? "add" : sign === "-" ? "del" : undefined}>
+            {sign === " " ? " " : sign} {text}
+            {"\n"}
+          </span>
+        ))}
+      </pre>
     </div>
   );
 }

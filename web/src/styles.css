@@ -2251,3 +2251,135 @@ a.btn {
     justify-self: start;
   }
 }
+
+/* Homepage: what it does, and connecting an agent */
+
+.feature-grid {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.feature {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 18px;
+  box-shadow: var(--shadow);
+}
+
+.feature-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--brand-tint);
+  color: var(--brand);
+  font-weight: 700;
+  font-size: 15px;
+  margin-bottom: 10px;
+}
+
+.feature h3,
+.connect-card h3 {
+  font-size: 16px;
+  font-weight: 650;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--ink);
+  margin: 0 0 6px;
+}
+
+.feature p,
+.connect-card p {
+  color: var(--ink-2);
+  line-height: 1.55;
+}
+
+.connect-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.connect-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 18px;
+  box-shadow: var(--shadow);
+  min-width: 0;
+}
+
+.code {
+  margin: 12px 0 0;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.code-diff span {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+}
+
+.code-diff .add {
+  background: var(--brand-tint);
+  color: var(--brand);
+}
+
+.code-diff .del {
+  background: var(--bad-bg);
+  color: var(--bad);
+}
+
+.diff-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.diff-tab {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-2);
+  border-radius: 999px;
+  padding: 5px 12px;
+  cursor: pointer;
+}
+
+.diff-tab.active {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: var(--on-brand);
+}
+
+.home-cta p {
+  max-width: 70ch;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+@media (max-width: 900px) {
+  .feature-grid,
+  .connect-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
