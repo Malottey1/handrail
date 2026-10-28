@@ -95,6 +95,8 @@ Open http://127.0.0.1:8787 and click **Set up Handrail**: the first account beco
 | Variable | Needed for |
 | --- | --- |
 | `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | Everything. Sandbox credentials only. |
+| `HANDRAIL_SETUP_TOKEN` | Creating the first (admin) account: the sign-up page asks for it. **Required on Render** (Handrail won't start there without it). Optional locally, where the first sign-up becomes admin without it. |
+| `HANDRAIL_DB_PATH`, `HANDRAIL_POLICY_PATH` | Optional. Where the SQLite database and the policy file live (default `handrail.db` and `policy.json`). If the policy file doesn't exist, Handrail copies the committed `policy.json` there on boot. |
 | `HANDRAIL_ADMIN_TOKEN` | Optional, local only. A bearer token for terminal scripts (`npm run approvals`, the demos); it acts as an admin, recorded as "Admin script". **Never set it on Render**: Handrail refuses to start there with it. People use their own accounts. |
 | `HANDRAIL_AGENT_TOKEN` | Optional. One extra agent key from `.env`. Normally an admin creates agent keys in the dashboard. |
 | `HANDRAIL_DEMO_ACCESS` | Optional. `true` turns on **Try the demo** and **Run demo agent**, each sign-in in its own workspace. For sandbox demos only. |
@@ -381,11 +383,40 @@ npm test                              # policy engine, gate, idempotency, audit 
 
 Decide held calls in the dashboard, or with `npm run approvals -- approve <id>`.
 
+## Deploy on Render
+
+Create a **Web Service** from the repository:
+
+| Setting | Value |
+| --- | --- |
+| Build command | `npm ci --include=dev && npm run build` (the build needs the dev dependencies, so don't set `NODE_ENV=production` for it) |
+| Start command | `npm start` |
+| Node | Set `NODE_VERSION` to 22.13 or later (`node:sqlite`) |
+
+Environment variables:
+
+- **Required:** `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` (sandbox), `HANDRAIL_SETUP_TOKEN` (a long random value: `openssl rand -hex 32`), `HANDRAIL_TRUST_PROXY=true`.
+- **For the public demo:** `HANDRAIL_DEMO_ACCESS=true`.
+- **Optional:** `ANTHROPIC_API_KEY` (AI briefs and plain-English rules), `BREVO_API_KEY` and `HANDRAIL_ALERT_FROM` (email alerts), `PAYPAL_WEBHOOK_ID` (see below). `HANDRAIL_PUBLIC_URL` defaults to Render's address.
+- **Never set `HANDRAIL_ADMIN_TOKEN` on Render.** Handrail refuses to start if it is set; people sign in with their own accounts.
+
+After the first deploy, open `/signup`, create the admin account and paste the setup token when asked. Without the token, the first account can't be created, so nobody else can claim it. Then register `https://<your-service>.onrender.com/webhooks/paypal` as a webhook in your PayPal sandbox app, set `PAYPAL_WEBHOOK_ID` to its ID, and redeploy.
+
+### Storage: persistent or temporary
+
+Handrail keeps accounts, the audit log, approvals and webhook events in one SQLite file, and the policy in a JSON file. Pick one:
+
+- **Persistent (a Render disk, paid instances).** Add a disk mounted at, say, `/var/data`, and set `HANDRAIL_DB_PATH=/var/data/handrail.db` and `HANDRAIL_POLICY_PATH=/var/data/policy.json`. On the first boot the policy file doesn't exist yet, so Handrail copies the committed `policy.json` there; after that, policy changes made in the dashboard are kept. A service with a disk runs as a single instance.
+- **Temporary (no disk).** Leave both variables unset. Everything works, but every deploy or restart starts from scratch: accounts, the audit log, approvals and policy changes are gone, and the policy is back to the committed `policy.json`. Sign up again with the setup token after each deploy. That's fine for a judged demo, since each **Try the demo** session gets its own in-memory workspace anyway.
+
+Handrail checks which one it's running on (on Render, a file counts as persistent when it's on a different filesystem from the app, which is what a mounted disk is). It logs the answer at startup and shows it on the **Setup** tab under **Storage**: *Persistent*, *Temporary*, or *Partly temporary* if only one of the two files is on the disk.
+
 ## Things I learned about PayPal's MCP server
 
 - The sandbox MCP server only works over **SSE** at `https://mcp.sandbox.paypal.com/sse`. The documented Streamable HTTP path `/http` returns 404 even with a valid token (`npm run probe` re-checks this).
 - API failures come back as a *successful* tool result whose text is `{"ok":false,"status":404,...}`, so Handrail checks the text to classify them.
 - The toolkit sets `PayPal-Request-Id` once per client, which is why Handrail sends refunds, captures and dispute concessions directly with its own per-operation ID.
+- Since late October 2026 the sandbox MCP server answers every tool call with `PAYPAL_API_SETUP_ERROR` "Unsupported cache mode: default" ([paypal/AI-Toolkit#34](https://github.com/paypal/AI-Toolkit/issues/34)), raised before any request is sent. Handrail records it as failed (nothing happened) and answers the dispute, product and invoice reads from the REST API with the toolkit's own requests; other tools return PayPal's error until it's fixed.
 
 ## Limits
 
