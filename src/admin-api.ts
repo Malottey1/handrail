@@ -190,6 +190,15 @@ type Route = {
 };
 
 /** An ISO time from the query string (also accepts epoch ms), as ISO; 400 if it isn't one. */
+function firstText(resultJson: string | null): string | null {
+  try {
+    const content = (JSON.parse(resultJson ?? "null") as { content?: Array<{ type: string; text?: string }> } | null)?.content;
+    return content?.find((c) => c.type === "text")?.text ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** A read-only tool with no required arguments, for the Setup page's test call. */
 const SETUP_TEST_TOOL = "list_products";
 
@@ -557,6 +566,8 @@ export function createAdminApi(deps: AdminDeps): (req: IncomingMessage, res: Ser
         decision: call?.decision ?? null,
         outcome: call?.outcome ?? null,
         durationMs: call?.duration_ms ?? Date.now() - started,
+        // What PayPal answered (already redacted in the call log), shortened.
+        detail: firstText(call?.result_json ?? null)?.slice(0, 300) ?? null,
       });
     } },
 

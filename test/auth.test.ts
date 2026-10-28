@@ -916,6 +916,7 @@ describe("setup test call", () => {
     assert.equal(res.data.tool, "list_products");
     assert.equal(res.data.ok, true);
     assert.equal(res.data.decision, "allow");
+    assert.equal(res.data.detail, "paypal:list_products");
     const calls = (await admin.req("GET", "/api/calls")).data as Array<{ id: number; tool: string; agent_name: string }>;
     assert.equal(calls.length, 1);
     assert.equal(calls[0]!.id, res.data.callId);
