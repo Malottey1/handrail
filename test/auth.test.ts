@@ -14,7 +14,7 @@ import { AuditChain } from "../src/audit-chain.js";
 import { CallLog } from "../src/audit.js";
 import { AccountStore } from "../src/auth/accounts.js";
 import { AgentKeyStore } from "../src/auth/agent-keys.js";
-import { checkAdminToken } from "../src/auth/http.js";
+import { checkAdminToken, checkSetupToken } from "../src/auth/http.js";
 import { hashPassword } from "../src/auth/passwords.js";
 import { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -57,7 +57,15 @@ class FakeEmail implements EmailSender {
 }
 
 async function setup(
-  opts: { demoAccess?: boolean; cookieSecure?: boolean | "auto"; adminToken?: string | undefined; email?: boolean; ttlMs?: number; policy?: Policy } = {},
+  opts: {
+    demoAccess?: boolean;
+    cookieSecure?: boolean | "auto";
+    adminToken?: string | undefined;
+    setupToken?: string;
+    email?: boolean;
+    ttlMs?: number;
+    policy?: Policy;
+  } = {},
 ) {
   const POLICY_IN_FORCE = opts.policy ?? POLICY;
   const db = new DatabaseSync(":memory:");
@@ -162,6 +170,7 @@ async function setup(
     postSlack,
     demo,
     adminToken: "adminToken" in opts ? opts.adminToken : ADMIN_TOKEN,
+    setupToken: opts.setupToken,
     demoAccess: !!opts.demoAccess,
     trustProxy: false,
     cookieSecure: opts.cookieSecure ?? "auto",
@@ -237,8 +246,8 @@ class Browser {
     return { status: res.status, data, headers: res.headers };
   }
 
-  signup(name: string, email: string, invite?: string) {
-    return this.req("POST", "/api/auth/signup", { name, email, password: PASSWORD, invite });
+  signup(name: string, email: string, invite?: string, setupToken?: string) {
+    return this.req("POST", "/api/auth/signup", { name, email, password: PASSWORD, invite, setupToken });
   }
 
   login(email: string, password = PASSWORD) {
@@ -630,6 +639,57 @@ describe("auth: the admin token", () => {
     assert.throws(() => checkAdminToken(ADMIN_TOKEN, { RENDER_SERVICE_ID: "srv-123" }), /must not be set on Render/);
     assert.equal(checkAdminToken(undefined, { RENDER: "true" }), undefined);
     assert.equal(checkAdminToken(ADMIN_TOKEN, {}), ADMIN_TOKEN);
+  });
+});
+
+describe("auth: setup token for the first admin", () => {
+  const SETUP_TOKEN = "s".repeat(40);
+
+  it("refuses to create the first admin without the token, or with a wrong one", async () => {
+    const { browser, base } = await setup({ setupToken: SETUP_TOKEN });
+    const before = await (await fetch(`${base}/api/auth/session`)).json();
+    assert.equal(before.setupRequired, true);
+    assert.equal(before.setupTokenRequired, true);
+
+    const none = await browser().signup("Mallory", "mallory@example.com");
+    assert.equal(none.status, 403);
+    assert.match(none.data.error, /setup token/);
+    const wrong = await browser().signup("Mallory", "mallory@example.com", undefined, "x".repeat(40));
+    assert.equal(wrong.status, 403);
+    // Nobody was created, so the real owner can still claim it.
+    assert.equal((await (await fetch(`${base}/api/auth/session`)).json()).setupRequired, true);
+
+    const owner = await browser().signup("Malcolm Clottey", "malcolm@example.com", undefined, SETUP_TOKEN);
+    assert.equal(owner.status, 200);
+    assert.equal(owner.data.user.role, "admin");
+    const after = await (await fetch(`${base}/api/auth/session`)).json();
+    assert.equal(after.setupTokenRequired, false);
+  });
+
+  it("doesn't let the token create a second admin, and invites don't need it", async () => {
+    const { browser, base } = await setup({ setupToken: SETUP_TOKEN });
+    const admin = browser();
+    await admin.signup("Malcolm Clottey", "malcolm@example.com", undefined, SETUP_TOKEN);
+    const again = await browser().signup("Someone Else", "else@example.com", undefined, SETUP_TOKEN);
+    assert.equal(again.status, 403);
+    assert.match(again.data.error, /invite/);
+
+    const invite = await admin.req("POST", "/api/invites", { email: "ada@example.com", role: "approver" });
+    const token = new URL(invite.data.link, base).searchParams.get("invite")!;
+    assert.equal((await browser().signup("Ada Approver", "ada@example.com", token)).status, 200);
+  });
+
+  it("keeps the old behaviour without a token: the first sign-up becomes admin", async () => {
+    const { browser, base } = await setup();
+    assert.equal((await (await fetch(`${base}/api/auth/session`)).json()).setupTokenRequired, false);
+    assert.equal((await browser().signup("Malcolm Clottey", "malcolm@example.com")).data.user.role, "admin");
+  });
+
+  it("stops Handrail from starting on Render without one", () => {
+    assert.throws(() => checkSetupToken(undefined, { RENDER: "true" }), /HANDRAIL_SETUP_TOKEN must be set on Render/);
+    assert.throws(() => checkSetupToken(undefined, { RENDER_SERVICE_ID: "srv-123" }), /must be set on Render/);
+    assert.equal(checkSetupToken(SETUP_TOKEN, { RENDER: "true" }), SETUP_TOKEN);
+    assert.equal(checkSetupToken(undefined, {}), undefined);
   });
 });
 

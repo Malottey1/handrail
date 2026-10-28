@@ -1,4 +1,4 @@
-import { ArrowRight, CirclePlay, Clock, FileText, Lock, Mail, ShieldCheck, User as UserIcon, UserCheck, type LucideIcon } from "lucide-react";
+import { ArrowRight, CirclePlay, Clock, FileText, KeyRound, Lock, Mail, ShieldCheck, User as UserIcon, UserCheck, type LucideIcon } from "lucide-react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { api, ApiError, type AuthState, type Role, type Session, type User } from "../api";
 import { Logo, PasswordInput, ThemeToggle } from "../components";
@@ -291,8 +291,10 @@ export function SignupPage({ auth, onSignedIn }: { auth: AuthState; onSignedIn: 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [setupToken, setSetupToken] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const needsSetupToken = !token && !!auth.setupTokenRequired;
 
   useEffect(() => {
     if (!token) return;
@@ -307,7 +309,7 @@ export function SignupPage({ auth, onSignedIn }: { auth: AuthState; onSignedIn: 
     setBusy(true);
     setError(null);
     try {
-      onSignedIn(await api<{ user: User; csrfToken: string }>(null, "/auth/signup", { method: "POST", body: { name, email, password, invite: token ?? undefined } }));
+      onSignedIn(await api<{ user: User; csrfToken: string }>(null, "/auth/signup", { method: "POST", body: { name, email, password, invite: token ?? undefined, setupToken: needsSetupToken ? setupToken : undefined } }));
     } catch (err) {
       setError(message(err));
       setBusy(false);
@@ -385,6 +387,11 @@ export function SignupPage({ auth, onSignedIn }: { auth: AuthState; onSignedIn: 
             required
           />
         </IconField>
+        {needsSetupToken && (
+          <IconField label="Setup token" icon={KeyRound} hint="The HANDRAIL_SETUP_TOKEN value from the server's environment. Only the person deploying Handrail has it.">
+            <PasswordInput autoComplete="off" placeholder="Paste the setup token" value={setupToken} onChange={(e) => setSetupToken(e.target.value)} required />
+          </IconField>
+        )}
         {error && (
           <p className="error" role="alert">
             {error}

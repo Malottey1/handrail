@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { constants, copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { classifyTool } from "./classify.js";
 import { policySchema, type Policy } from "./types.js";
 
@@ -30,4 +31,23 @@ export function parsePolicy(input: unknown): Policy {
 
 export function loadPolicyFile(path: string): Policy {
   return parsePolicy(JSON.parse(readFileSync(path, "utf8")));
+}
+
+/**
+ * If the policy file doesn't exist yet (a fresh deploy with HANDRAIL_POLICY_PATH
+ * on an empty disk, or no disk), copies the committed default there, so
+ * Handrail always starts with the demo-ready rules. Never overwrites a file.
+ * Returns true if it seeded one.
+ */
+export function seedPolicyFile(path: string, defaultPath: string): boolean {
+  if (existsSync(path) || resolve(path) === resolve(defaultPath)) return false;
+  loadPolicyFile(defaultPath); // refuse to seed from an invalid default
+  mkdirSync(dirname(resolve(path)), { recursive: true });
+  try {
+    copyFileSync(defaultPath, path, constants.COPYFILE_EXCL);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "EEXIST") return false; // another process got there first
+    throw err;
+  }
+  return true;
 }

@@ -30,6 +30,21 @@ export function checkAdminToken(token: string | undefined, env: Record<string, s
   return token;
 }
 
+/**
+ * On a public deploy, whoever signs up first becomes admin. HANDRAIL_SETUP_TOKEN
+ * closes that race: with it set, the first account needs the token. Render is
+ * public by definition, so Handrail refuses to start there without one.
+ * Locally it's optional and the first sign-up becomes admin as before.
+ */
+export function checkSetupToken(token: string | undefined, env: Record<string, string | undefined>): string | undefined {
+  if (!token && (env.RENDER || env.RENDER_SERVICE_ID)) {
+    throw new Error(
+      "HANDRAIL_SETUP_TOKEN must be set on Render: it's needed to create the first admin account. Set it to a long random value (openssl rand -hex 32).",
+    );
+  }
+  return token;
+}
+
 export interface HttpOptions {
   adminToken: string | undefined;
   trustProxy: boolean;

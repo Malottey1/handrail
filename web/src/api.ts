@@ -27,6 +27,8 @@ export interface AuthState {
   user: User | null;
   csrfToken: string | null;
   setupRequired: boolean;
+  /** The server has HANDRAIL_SETUP_TOKEN set: the first account needs it. */
+  setupTokenRequired?: boolean;
   demoAccess: boolean;
 }
 
@@ -164,9 +166,17 @@ export interface SetupItem {
   confirmedAt?: string | null;
 }
 
+/** Whether data survives a redeploy (src/storage.ts). */
+export interface StorageStatus {
+  mode: "local" | "persistent" | "temporary" | "partial";
+  db: { path: string; persistent: boolean };
+  policy: { path: string; persistent: boolean };
+}
+
 export interface SetupChecklist {
   mcpUrl: string;
   webhookUrl: string;
+  storage: StorageStatus | null;
   items: SetupItem[];
 }
 

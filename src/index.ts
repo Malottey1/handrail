@@ -18,7 +18,8 @@ import { PayPalDirect } from "./paypal/direct.js";
 import { PayPalRest } from "./paypal/rest.js";
 import { connectUpstream } from "./paypal/upstream.js";
 import { AnthropicLlm } from "./ai/llm.js";
-import { loadPolicyFile } from "./policy/load.js";
+import { loadPolicyFile, seedPolicyFile } from "./policy/load.js";
+import { describeStorage, storageStatus } from "./storage.js";
 import { handleMcp } from "./mcp-endpoint.js";
 import { handleToolApi } from "./tool-api.js";
 import { createProxyServer, SERVER_INFO } from "./proxy.js";
@@ -32,13 +33,19 @@ import { SettingsStore } from "./notify/settings.js";
 /** The built React dashboard (npm run build:web). */
 const DASHBOARD_DIR = process.env.HANDRAIL_DASHBOARD_DIR?.trim() || "web/dist";
 
+/** The committed default policy, copied to HANDRAIL_POLICY_PATH when that file doesn't exist yet. */
+const DEFAULT_POLICY = "policy.json";
+
 async function main(): Promise<void> {
   const config = loadConfig();
   const stdio = process.argv.includes("--stdio");
 
   // Load the policy before touching PayPal: a bad policy should stop startup.
+  if (seedPolicyFile(config.policyPath, DEFAULT_POLICY)) log(`No policy at ${config.policyPath}; copied the default from ${DEFAULT_POLICY}`);
   const policy = loadPolicyFile(config.policyPath);
   log(`Loaded policy ${config.policyPath} with ${policy.rules.length} rules`);
+  const storage = storageStatus(config.dbPath, config.policyPath, process.env);
+  log(`Storage: ${describeStorage(storage)}`);
 
   const tokens = new PayPalTokenManager(config.paypalBaseUrl, config.paypalClientId, config.paypalClientSecret);
   await tokens.getToken(); // fail fast on bad credentials
@@ -136,6 +143,8 @@ async function main(): Promise<void> {
     llm,
     demo,
     adminToken: config.adminToken,
+    setupToken: config.setupToken,
+    storage,
     demoAccess: config.demoAccess,
     trustProxy: config.trustProxy,
     cookieSecure: config.cookieSecure,

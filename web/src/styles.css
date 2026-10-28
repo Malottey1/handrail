@@ -8306,3 +8306,57 @@ a.btn {
     height: 48px;
   }
 }
+
+/* Setup: where the data lives, and whether it survives a redeploy */
+
+.setup-storage {
+  padding: 20px 24px;
+  border-radius: 18px;
+}
+
+.setup-storage-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.setup-storage-head h2 {
+  font-size: 20px;
+  font-weight: 700;
+  margin-right: auto;
+}
+
+.setup-storage-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--ink-2);
+}
+
+.setup-storage > p {
+  margin-top: 10px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+
+.setup-storage-paths {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px 12px;
+  margin: 12px 0 0;
+  font-size: 13px;
+}
+
+.setup-storage-paths dt {
+  color: var(--ink-3);
+}
+
+.setup-storage-paths dd {
+  margin: 0;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}

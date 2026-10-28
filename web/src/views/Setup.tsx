@@ -1,7 +1,7 @@
-import { ArrowRight, Bot, Check, ChevronRight, CirclePlay, Code, FileText, KeyRound, Landmark, Lightbulb, ShieldCheck, X } from "lucide-react";
+import { ArrowRight, Bot, Check, ChevronRight, CirclePlay, Code, FileText, HardDrive, KeyRound, Landmark, Lightbulb, ShieldCheck, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
-import { api, ApiError, can, type Session, type SetupChecklist, type SetupItem } from "../api";
-import { CopyButton, Logo, PageHeader, usePoll } from "../components";
+import { api, ApiError, can, type Session, type SetupChecklist, type SetupItem, type StorageStatus } from "../api";
+import { CopyButton, Logo, PageHeader, Pill, usePoll } from "../components";
 import { timeAgo } from "../format";
 
 interface TestCall {
@@ -64,7 +64,7 @@ export function SetupView({ session, title, subtitle }: { session: Session; titl
       </>
     );
 
-  const { items, mcpUrl, webhookUrl } = setup.data;
+  const { items, mcpUrl, webhookUrl, storage } = setup.data;
   const byId = new Map(items.map((i) => [i.id, i]));
   const manual = items.filter((i) => i.kind === "confirm");
   const done = items.filter((i) => i.ok).length;
@@ -166,6 +166,8 @@ export function SetupView({ session, title, subtitle }: { session: Session; titl
         </div>
 
         <aside className="setup-side">
+          {storage && <StorageCard storage={storage} demo={session.user.isDemo} showPaths={isAdmin} />}
+
           <section className="card setup-progress">
             <h2>Setup progress</h2>
             <p>
@@ -360,5 +362,57 @@ function TestCallButton({ session, onDone }: { session: Session; onDone: () => v
         {busy ? "Sending…" : result ? "Send again" : "Send test call"}
       </button>
     </div>
+  );
+}
+
+const STORAGE: Record<StorageStatus["mode"], { pill: string; tone: string; text: string }> = {
+  persistent: {
+    pill: "Persistent",
+    tone: "good",
+    text: "Accounts, the audit log, approvals and the policy are on a Render disk, so they survive deploys and restarts.",
+  },
+  temporary: {
+    pill: "Temporary",
+    tone: "warn",
+    text: "There's no Render disk, so accounts, the audit log, approvals and policy changes reset on every deploy or restart. To keep them, attach a disk and point HANDRAIL_DB_PATH and HANDRAIL_POLICY_PATH at it.",
+  },
+  partial: {
+    pill: "Partly temporary",
+    tone: "warn",
+    text: "Only part of Handrail's data is on a Render disk. The rest resets on every deploy or restart.",
+  },
+  local: {
+    pill: "This machine",
+    tone: "neutral",
+    text: "The database and policy are files on this machine's disk and survive restarts.",
+  },
+};
+
+/** Whether the data survives a redeploy. Demo workspaces are in memory regardless. */
+function StorageCard({ storage, demo, showPaths }: { storage: StorageStatus; demo: boolean; showPaths: boolean }) {
+  const s = STORAGE[storage.mode];
+  return (
+    <section className="card setup-storage">
+      <div className="setup-storage-head">
+        <span className="setup-storage-icon" aria-hidden="true">
+          <HardDrive size={18} />
+        </span>
+        <h2>Storage</h2>
+        <Pill tone={s.tone}>{s.pill}</Pill>
+      </div>
+      <p>{demo ? "Your demo workspace is kept in memory and cleared after 2 hours without use. " : ""}{s.text}</p>
+      {showPaths && storage.mode !== "local" && (
+        <dl className="setup-storage-paths">
+          <dt>Database</dt>
+          <dd>
+            <code>{storage.db.path}</code> {storage.db.persistent ? "on a disk" : "resets"}
+          </dd>
+          <dt>Policy</dt>
+          <dd>
+            <code>{storage.policy.path}</code> {storage.policy.persistent ? "on a disk" : "resets"}
+          </dd>
+        </dl>
+      )}
+    </section>
   );
 }

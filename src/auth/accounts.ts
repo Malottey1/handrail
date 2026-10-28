@@ -196,10 +196,21 @@ export class AccountStore {
    * invite is required, and it sets the role. Checked inside the transaction,
    * so two simultaneous first sign-ups can't both become admin.
    */
-  signUp(input: { email: string; name: string; passwordHash: string; inviteToken: string | null }, now: number): User {
+  /**
+   * `setupTokenOk` is false when HANDRAIL_SETUP_TOKEN is set and the request
+   * didn't carry it. It only matters for the first account (the admin), and is
+   * checked inside the same transaction that decides the account is the first.
+   */
+  signUp(
+    input: { email: string; name: string; passwordHash: string; inviteToken: string | null; setupTokenOk?: boolean },
+    now: number,
+  ): User {
     return this.chain.record(now, () => {
       let role: Role = "admin";
       let invite: InviteRow | null = null;
+      if (this.countUsers() === 0 && input.setupTokenOk === false) {
+        throw new AccountError("Creating the first admin account needs the setup token (HANDRAIL_SETUP_TOKEN on the server).", 403);
+      }
       if (this.countUsers() > 0) {
         if (!input.inviteToken) throw new AccountError("Handrail already has an admin. Ask them for an invite link.", 403);
         invite = this.usableInvite(input.inviteToken, now);

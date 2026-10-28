@@ -11,6 +11,7 @@ import {
   ADMIN_SCRIPT,
   crossSite,
   csrfOk,
+  safeEqual,
   setSessionCookie,
   type HttpOptions,
   type Principal,
@@ -27,6 +28,7 @@ import { agentClaims } from "./policy/claims.js";
 import { PolicyConflictError } from "./policy/store.js";
 import { redact, redactDeep } from "./redact.js";
 import { activityStats, COUNTERS } from "./stats.js";
+import type { StorageStatus } from "./storage.js";
 import type { MatchStatus } from "./webhooks.js";
 import type { Workspace } from "./workspace.js";
 
@@ -51,6 +53,10 @@ export interface AdminDeps extends HttpOptions {
   postSlack?: SlackPoster;
   /** For the Setup checklist: where agents and PayPal reach Handrail, and whether webhooks are on. */
   setup?: { publicUrl: string; webhooksConfigured: boolean };
+  /** When set, creating the first (admin) account needs it. */
+  setupToken?: string;
+  /** Where data and the policy are kept, and whether they survive a redeploy (src/storage.ts). */
+  storage?: StorageStatus;
   now?: () => number;
 }
 
@@ -298,6 +304,7 @@ export function createAdminApi(deps: AdminDeps): (req: IncomingMessage, res: Ser
         user: principal?.kind === "session" ? publicUser(principal.user) : null,
         csrfToken: principal?.kind === "session" ? principal.csrf : null,
         setupRequired: deps.accounts.countUsers() === 0,
+        setupTokenRequired: deps.accounts.countUsers() === 0 && !!deps.setupToken,
         demoAccess: deps.demoAccess && deps.accounts.demoUser() !== null,
       });
       return true;
@@ -317,8 +324,9 @@ export function createAdminApi(deps: AdminDeps): (req: IncomingMessage, res: Ser
       const name = normalizeName(body.name);
       const problem = passwordProblem(body.password);
       if (problem) throw new AccountError(problem, 400);
+      const setupTokenOk = !deps.setupToken || (typeof body.setupToken === "string" && safeEqual(body.setupToken.trim(), deps.setupToken));
       const user = deps.accounts.signUp(
-        { email, name, passwordHash: await hashPassword(body.password as string), inviteToken: text(body.invite, 200) },
+        { email, name, passwordHash: await hashPassword(body.password as string), inviteToken: text(body.invite, 200), setupTokenOk },
         clock(),
       );
       startSession(ctx, user);
@@ -401,6 +409,7 @@ export function createAdminApi(deps: AdminDeps): (req: IncomingMessage, res: Ser
     return {
       mcpUrl: `${publicUrl}/mcp`,
       webhookUrl: `${publicUrl}/webhooks/paypal`,
+      storage: deps.storage ?? null,
       items: [
         manual(
           "agent-no-credentials",

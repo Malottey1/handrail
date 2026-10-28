@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { checkAdminToken } from "./auth/http.js";
+import { checkAdminToken, checkSetupToken } from "./auth/http.js";
 import { registerClientCredentials, registerSecrets } from "./redact.js";
 
 export interface Config {
@@ -13,6 +13,8 @@ export interface Config {
   policyPath: string;
   /** Bearer token for scripts using the admin API. Unset (the default, and required on Render) refuses all bearer tokens. */
   adminToken: string | undefined;
+  /** Needed to create the first admin account; required on Render. */
+  setupToken: string | undefined;
   /** How long a held call waits inline for a human before returning "pending". */
   approvalWaitMs: number;
   /** Identical calls (no idempotency_key) within this window count as one operation. */
@@ -102,6 +104,7 @@ export function loadConfig(): Config {
   }
 
   const adminToken = checkAdminToken(token("HANDRAIL_ADMIN_TOKEN"), process.env);
+  const setupToken = checkSetupToken(token("HANDRAIL_SETUP_TOKEN"), process.env);
   const paypalClientId = required("PAYPAL_CLIENT_ID");
   const paypalClientSecret = required("PAYPAL_CLIENT_SECRET");
   const agentToken = token("HANDRAIL_AGENT_TOKEN");
@@ -109,7 +112,7 @@ export function loadConfig(): Config {
   // From here on, these values are redacted wherever they'd appear (src/redact.ts).
   registerClientCredentials(paypalClientId, paypalClientSecret);
   const email = emailConfig();
-  registerSecrets(adminToken, agentToken, anthropicApiKey, email?.brevoApiKey);
+  registerSecrets(adminToken, setupToken, agentToken, anthropicApiKey, email?.brevoApiKey);
   const port = Number(process.env.PORT) || 8787;
 
   return {
@@ -121,6 +124,7 @@ export function loadConfig(): Config {
     dbPath: process.env.HANDRAIL_DB_PATH?.trim() || "handrail.db",
     policyPath: process.env.HANDRAIL_POLICY_PATH?.trim() || "policy.json",
     adminToken,
+    setupToken,
     approvalWaitMs: positiveNumber("HANDRAIL_APPROVAL_WAIT_SECONDS", 20) * 1000,
     idempotencyWindowMs: positiveNumber("HANDRAIL_IDEMPOTENCY_WINDOW_MINUTES", 60) * 60 * 1000,
     agentToken,
