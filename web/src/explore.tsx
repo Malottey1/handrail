@@ -1,5 +1,5 @@
 import type { CsvExportParams, GridApi, GridReadyEvent } from "ag-grid-community";
-import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, Search, X } from "lucide-react";
+import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, Search, SlidersHorizontal, X } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 
 // Shared pieces of the Activity, Webhooks and Audit log pages: a filter card,
@@ -92,13 +92,22 @@ export function optionsFrom(all: string, values: Iterable<string | null | undefi
   return [{ value: "", label: all }, ...distinct];
 }
 
+/** On phones only the first row (search and dates) shows until "More filters" opens the rest. */
 export function FilterCard({ children, onReset, active }: { children: ReactNode; onReset: () => void; active: boolean }) {
+  const [open, setOpen] = useState(false);
   return (
-    <section className="filter-card" aria-label="Filters">
+    <section className={`filter-card ${open ? "is-open" : ""}`} aria-label="Filters">
       {children}
-      <button type="button" className="filter-reset" onClick={onReset} disabled={!active}>
-        Reset
-      </button>
+      <div className="filter-actions">
+        <button type="button" className="filter-toggle" onClick={() => setOpen(!open)} aria-expanded={open}>
+          <SlidersHorizontal size={16} aria-hidden="true" />
+          {open ? "Fewer filters" : "More filters"}
+          {active && !open && <span className="filter-on">On</span>}
+        </button>
+        <button type="button" className="filter-reset" onClick={onReset} disabled={!active}>
+          Reset
+        </button>
+      </div>
     </section>
   );
 }

@@ -253,7 +253,7 @@ export function ApprovalsView({
           </ul>
         </section>
 
-        <section className="review-detail" aria-label="Selected call">
+        <section className={`review-detail ${current ? "" : "is-empty"}`} aria-label="Selected call">
           {current ? (
             <ApprovalDetail
               key={current.id}

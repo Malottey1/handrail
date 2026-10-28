@@ -238,7 +238,7 @@ function Members({
                       )}
                     </td>
                     <td>{u.disabled ? <Pill tone="muted">Disabled</Pill> : <Pill tone="good">Active</Pill>}</td>
-                    <td className="cell-muted">{timeAgo(u.createdAt, now)}</td>
+                    <td className="cell-muted" data-label="Joined">{timeAgo(u.createdAt, now)}</td>
                     <td className="actions">
                       {!self && (
                         <button type="button" className="btn btn-ghost btn-sm" onClick={() => void change(u, { disabled: !u.disabled })}>
@@ -349,8 +349,8 @@ function Keys({ session, keys, loading, nameOf, onChange }: { session: Session; 
                   <td>
                     <Mono>{k.prefix}…</Mono>
                   </td>
-                  <td className="cell-muted">{nameOf(k.createdBy)}</td>
-                  <td className="cell-muted">{k.lastUsedAt ? timeAgo(new Date(k.lastUsedAt).toISOString(), now) : "Never"}</td>
+                  <td className="cell-muted" data-label="Created by">{nameOf(k.createdBy)}</td>
+                  <td className="cell-muted" data-label="Last used">{k.lastUsedAt ? timeAgo(new Date(k.lastUsedAt).toISOString(), now) : "Never"}</td>
                   <td>{k.revokedAt ? <Pill tone="bad">Revoked</Pill> : <Pill tone="good">Active</Pill>}</td>
                   <td className="actions">
                     {!k.revokedAt && (

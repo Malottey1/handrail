@@ -3857,6 +3857,15 @@ a.btn {
   color: var(--ink-3);
 }
 
+.integrity-short {
+  display: none;
+}
+
+/* The alerts chip moves from the top bar into the menu on phones. */
+.sidebar-alerts {
+  display: none;
+}
+
 .topbar-user {
   font: inherit;
   display: flex;
@@ -5778,6 +5787,33 @@ a.btn {
   text-decoration: underline;
   text-underline-offset: 3px;
   cursor: pointer;
+}
+
+.filter-actions {
+  display: contents;
+}
+
+.filter-toggle {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+.filter-on {
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--brand-tint);
+  color: var(--brand);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .filter-reset:disabled {
@@ -7861,4 +7897,164 @@ a.btn {
 .team-table .mono {
   white-space: nowrap;
   word-break: normal;
+}
+
+/* Responsive pass: one-row top bar on phones, room for the top bar on tablets,
+   collapsible filters on phones */
+
+.alerts-chip {
+  white-space: nowrap;
+}
+
+.topbar-search {
+  min-width: 0;
+}
+
+@media (max-width: 1250px) {
+  .integrity-meta {
+    display: none;
+  }
+  .topbar {
+    gap: 12px;
+    padding: 0 24px;
+  }
+}
+
+@media (max-width: 1023px) {
+  .topbar-search {
+    flex: 1 1 140px;
+  }
+}
+
+@media (max-width: 1250px) {
+  .review-detail.is-empty {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .topbar {
+    flex-wrap: nowrap;
+    gap: 8px;
+  }
+  .topbar:has(.topbar-search) {
+    flex-wrap: wrap;
+  }
+  .topbar-right {
+    gap: 8px;
+  }
+  .env-chip {
+    height: 30px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+  .integrity-label {
+    display: none;
+  }
+  .sidebar-alerts {
+    display: block;
+    margin: auto 0 12px;
+  }
+  .sidebar-alerts .alerts-chip {
+    display: inline-flex;
+  }
+  .sidebar > .sidebar-alerts + .user-menu {
+    margin-top: 0;
+  }
+  .integrity-short {
+    display: inline;
+  }
+  .integrity {
+    height: 34px;
+    font-size: 13px;
+  }
+  .topbar-user > svg {
+    display: none;
+  }
+  .topbar-user .avatar {
+    width: 38px;
+    height: 38px;
+  }
+  .filter-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .filter-toggle {
+    display: inline-flex;
+  }
+  .filter-card:not(.is-open) .filter-row:not(:first-of-type) {
+    display: none;
+  }
+  .integrity-card-dates {
+    flex-wrap: wrap;
+    gap: 12px 24px;
+  }
+}
+
+@media (max-width: 420px) {
+  .hero-card-approve,
+  .hero-card-reject {
+    white-space: nowrap;
+    font-size: 15px;
+    padding-inline: 12px;
+  }
+}
+
+/* Phones: compact team tiles, tabs that fit, table rows as stacked cards */
+@media (max-width: 760px) {
+  .metrics.metrics-3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .metrics-3 .metric {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+    padding: 12px;
+  }
+  .metrics-3 .metric-icon,
+  .metrics-3 .trend {
+    display: none;
+  }
+  .seg-tabs {
+    gap: 16px;
+  }
+  .seg-tab {
+    font-size: 14.5px;
+    gap: 6px;
+  }
+  .account-tabs .seg-tab svg {
+    display: none;
+  }
+  .team-table thead {
+    display: none;
+  }
+  .team-table,
+  .team-table tbody {
+    display: block;
+  }
+  .team-table tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  .team-table td {
+    display: block;
+    padding: 0;
+    border: 0;
+  }
+  .team-table td:first-child,
+  .team-table td:nth-child(2) {
+    flex-basis: 100%;
+  }
+  .team-table td[data-label]::before {
+    content: attr(data-label) " ";
+    color: var(--ink-3);
+  }
+  .team-table td.actions {
+    margin-left: auto;
+  }
 }

@@ -189,6 +189,11 @@ function Dashboard({ session, onSignOut, onUserChange }: { session: Session; onS
             );
           })}
         </nav>
+        {s && (
+          <div className="sidebar-alerts">
+            <AlertsChip alerts={s.alerts} />
+          </div>
+        )}
         <UserMenu session={session} onSignOut={onSignOut} placement="up">
           {(open, toggle) => (
             <button className="side-user" onClick={toggle} aria-expanded={open} aria-haspopup="menu">
@@ -369,6 +374,7 @@ function IntegrityBadge({ verify, error, onClick }: { verify: VerifyResult | nul
     <button className={`integrity ${verify.ok ? "ok" : "bad"}`} onClick={onClick} title={`Head hash ${verify.head}`}>
       <span className="dot" aria-hidden="true" />
       <span className="integrity-label">{verify.ok ? "Audit log intact" : `Tampering detected (${verify.problems.length})`}</span>
+      <span className="integrity-short">{verify.ok ? "Intact" : "Tampered"}</span>
       <span className="integrity-meta">
         · {verify.entries.toLocaleString()} entries · {shortHash(verify.head)}
       </span>
