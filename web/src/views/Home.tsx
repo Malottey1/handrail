@@ -1,230 +1,433 @@
-import { useState } from "react";
+import {
+  ArrowRight,
+  Ban,
+  Bell,
+  Bot,
+  Check,
+  CircleCheck,
+  CirclePause,
+  Clock,
+  Hash,
+  Plug,
+  ReceiptText,
+  Repeat2,
+  Scale,
+  ShieldAlert,
+  ShieldCheck,
+  Sigma,
+  Sparkles,
+  Undo2,
+  UserCheck,
+  X,
+  type LucideIcon,
+} from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { AuthState, Session } from "../api";
-import { Logo, Pill, ThemeToggle } from "../components";
+import { CopyButton, Logo, ThemeToggle } from "../components";
 import { link } from "../router";
 import { useDemoSignIn } from "./AuthPages";
 
-/** The public front page at /. */
-export function HomePage({ auth, session, onSignedIn }: { auth: AuthState; session: Session | null; onSignedIn: (s: Session) => void }) {
-  const demo = useDemoSignIn(onSignedIn);
+type Props = { auth: AuthState; session: Session | null; onSignedIn: (s: Session) => void };
 
-  const actions = session ? (
-    <a className="btn btn-primary btn-lg" {...link("/app")}>
-      Open the dashboard
+/** The public front page at /. */
+export function HomePage({ auth, session, onSignedIn }: Props) {
+  const demo = useDemoSignIn(onSignedIn);
+  const signInPath = auth.setupRequired ? "/signup" : "/login";
+  const signInLabel = auth.setupRequired ? "Set up Handrail" : "Log in";
+
+  // The main call to action: the dashboard when signed in, else the demo (when on), else sign-in.
+  const primary = session ? (
+    <a className="btn-hero btn-hero-primary" {...link("/app")}>
+      Open the dashboard <ArrowRight size={20} aria-hidden="true" />
     </a>
+  ) : auth.demoAccess ? (
+    <button className="btn-hero btn-hero-primary" onClick={demo.start} disabled={demo.busy}>
+      {demo.busy ? "Opening the demo…" : "Try the demo"} <ArrowRight size={20} aria-hidden="true" />
+    </button>
   ) : (
-    <>
-      {auth.demoAccess && (
-        <button className="btn btn-primary btn-lg" onClick={demo.start} disabled={demo.busy}>
-          {demo.busy ? "Opening the demo…" : "Try the demo"}
-        </button>
-      )}
-      <a className={`btn btn-lg ${auth.demoAccess ? "btn-secondary" : "btn-primary"}`} {...link(auth.setupRequired ? "/signup" : "/login")}>
-        {auth.setupRequired ? "Set up Handrail" : "Sign in"}
-      </a>
-    </>
+    <a className="btn-hero btn-hero-primary" {...link(signInPath)}>
+      {signInLabel} <ArrowRight size={20} aria-hidden="true" />
+    </a>
   );
 
   return (
     <div className="home">
-      <header className="home-nav">
-        <a className="brand" {...link("/")}>
-          <Logo />
-          <span className="brand-name">Handrail</span>
-        </a>
-        <nav className="home-links">
-          <a href="#problem">The problem</a>
-          <a href="#features">What it does</a>
-          <a href="#connect">Connect your agent</a>
-        </nav>
-        <div className="home-nav-actions">
-          <ThemeToggle />
-          {session ? (
-            <a className="btn btn-secondary" {...link("/app")}>
-              Dashboard
-            </a>
-          ) : (
-            <a className="btn btn-secondary" {...link("/login")}>
-              Sign in
-            </a>
-          )}
+      <SiteNav auth={auth} session={session} demo={demo} signInPath={signInPath} signInLabel={signInLabel} />
+
+      <section className="home-hero">
+        <div className="home-hero-bg" aria-hidden="true">
+          <RailArt />
         </div>
-      </header>
-
-      <section className="hero">
-        <div className="hero-copy">
-          <p className="kicker">A drop-in safety layer for PayPal's Agent Toolkit</p>
-          <h1>Let your agent work with PayPal, without handing it the keys to the till.</h1>
-          <p className="hero-lede">
-            Handrail sits between your AI agent and PayPal. Point an existing Agent Toolkit agent at it, over MCP or from LangChain,
-            CrewAI or the Vercel AI SDK. Every refund, dispute concession and cancellation is checked against your limits, sent to a
-            person when it needs one, executed once, and written to an audit trail you can verify.
-          </p>
-          <div className="hero-actions">{actions}</div>
-          {demo.error && <p className="error">{demo.error}</p>}
-          {auth.demoAccess && !session && (
-            <p className="fine">The demo signs you in as an approver on PayPal's sandbox. No real money moves.</p>
-          )}
-        </div>
-        <HeroCard />
-      </section>
-
-      <section className="home-section" id="problem">
-        <h2>The problem</h2>
-        <p className="section-lede">
-          Connect an agent to PayPal's toolkit and it can move money on its own. The toolkit lets you switch whole tools on or off, and
-          that's the only control there is.
-        </p>
-        <ul className="problem-list">
-          <li>
-            <strong>Refunds go straight out.</strong> A confused or manipulated agent can refund any amount, as often as it likes.
-          </li>
-          <li>
-            <strong>Disputes get conceded.</strong> One <code>accept_dispute_claim</code> call gives the money back to the buyer, and no
-            one is asked first.
-          </li>
-          <li>
-            <strong>Cancellations are instant.</strong> Invoices, subscriptions and recurring billing can be cancelled in a single call.
-          </li>
-          <li>
-            <strong>No approvals or limits.</strong> There's no per-call ceiling, no daily cap, and no way to have a person sign off on a
-            large refund.
-          </li>
-          <li>
-            <strong>Retries can pay out twice.</strong> PayPal's idempotency id is set once per client, not per call, so a retried refund
-            can run again.
-          </li>
-          <li>
-            <strong>No record.</strong> Nothing shows what the agent asked for, who allowed it, or whether PayPal's events match.
-          </li>
-        </ul>
-      </section>
-
-      <section className="home-section" id="how">
-        <h2>How it works</h2>
-        <ol className="steps">
-          <li>
-            <span className="step-num">1</span>
-            <h3>Point your agent at Handrail</h3>
-            <p>
-              Handrail offers the same 46 PayPal tools, plus one optional tool for checking held calls. Your agent keeps working as it
-              is; it just connects to Handrail with its own key instead of to PayPal.
+        <div className="home-hero-inner">
+          <div className="home-hero-copy">
+            <p className="eyebrow eyebrow-mint">Safe AI actions for PayPal</p>
+            <h1>
+              Let your agent move fast.
+              <br />
+              Keep PayPal actions under control.
+            </h1>
+            <p className="home-hero-lede">
+              Handrail is a drop-in safety layer between your AI agent and PayPal's Agent Toolkit, with deterministic rules, human
+              approval, idempotency and a tamper-evident audit log. Move faster with confidence.
             </p>
-          </li>
-          <li>
-            <span className="step-num">2</span>
-            <h3>Every money-moving call meets your rules</h3>
-            <p>
-              Small refunds go through. Large ones wait for a person. Some never happen. Rules are plain, tested code. You can write
-              them in everyday English and Handrail shows you exactly what will change before you confirm.
-            </p>
-          </li>
-          <li>
-            <span className="step-num">3</span>
-            <h3>People decide, PayPal executes once, everything is recorded</h3>
-            <p>
-              Approvers see the facts and a short AI brief, then approve or reject. Approved calls reach PayPal exactly once, even when
-              the agent retries. Each decision is written to a hash-chained log, and PayPal's webhooks are matched back to the call
-              that caused them.
-            </p>
-          </li>
-        </ol>
-      </section>
-
-      <section className="home-section" id="features">
-        <h2>What Handrail does</h2>
-        <p className="section-lede">Rules decide. People approve. AI only explains.</p>
-        <ul className="feature-grid">
-          {FEATURES.map((f) => (
-            <li key={f.title} className="feature">
-              <span className="feature-icon" aria-hidden="true">
-                {f.icon}
-              </span>
-              <h3>{f.title}</h3>
-              <p>{f.body}</p>
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      <section className="home-section" id="connect">
-        <h2>Works with the agent you have</h2>
-        <p className="section-lede">
-          No new SDK to learn. Handrail offers the same PayPal tools, so you change where the agent connects and nothing else. The
-          agent gets a Handrail key; your PayPal credentials stay in Handrail.
-        </p>
-        <div className="connect-grid">
-          <div className="connect-card">
-            <h3>MCP agents</h3>
-            <p>Point the agent's PayPal MCP server at Handrail.</p>
-            <pre className="code">{MCP_SNIPPET}</pre>
+            <div className="home-hero-actions">
+              {primary}
+              <a className="btn-hero btn-hero-outline" href="#connect">
+                Connect your agent
+              </a>
+            </div>
+            {demo.error && (
+              <p className="home-error" role="alert">
+                {demo.error}
+              </p>
+            )}
+            {auth.demoAccess && !session && <p className="home-hero-fine">The demo signs you in as an approver on PayPal's sandbox. No real money moves.</p>}
           </div>
-          <FrameworkDiffs />
+          <HeroCard />
         </div>
       </section>
 
-      <section className="home-cta">
-        <h2>Try the demo</h2>
-        <p>
-          Sign in as an approver on PayPal's sandbox and run the demo agent. A small refund goes through. A large one waits for you, with
-          an AI brief. Its retry is caught. Three small refunds that add up too much are held. Approve or reject, then check the record.
-        </p>
-        <div className="hero-actions">{actions}</div>
+      <section className="home-band" id="product">
+        <div className="home-wrap home-split">
+          <div className="home-split-copy">
+            <p className="eyebrow">Deterministic control for every action</p>
+            <h2>
+              Allow, hold, or block.
+              <br />
+              Your rules, not guesses.
+            </h2>
+            <p className="home-lede">
+              Every refund, dispute concession, cancellation and capture your agent attempts is checked against plain, tested rules
+              before PayPal sees it. AI explains held calls; it never decides.
+            </p>
+            <a className="text-link" href="#how">
+              See how it works <ArrowRight size={17} aria-hidden="true" />
+            </a>
+          </div>
+          <ul className="outcome-cards">
+            {OUTCOMES.map((o) => (
+              <li key={o.title} className={`outcome-card outcome-${o.tone}`}>
+                <div className="outcome-card-head">
+                  <span className="outcome-icon" aria-hidden="true">
+                    <o.icon size={24} strokeWidth={2} />
+                  </span>
+                  <h3>{o.title}</h3>
+                </div>
+                <p className="outcome-sub">{o.sub}</p>
+                <ul className="outcome-points">
+                  {o.points.map((p) => (
+                    <li key={p}>
+                      <span className="outcome-tick" aria-hidden="true">
+                        <Check size={12} strokeWidth={3} />
+                      </span>
+                      {p}
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
+
+      <section className="home-band home-band-tint" id="how">
+        <div className="home-wrap home-split">
+          <div className="home-split-copy">
+            <p className="eyebrow">From agent to action</p>
+            <h2>How Handrail works</h2>
+            <p className="home-lede">
+              Handrail sits between your AI agent and PayPal. It offers the same 46 tools, checks each money-moving call against your
+              rules, waits for a person when one is needed, and records everything.
+            </p>
+            <a className="text-link" href="#connect">
+              Connect your agent <ArrowRight size={17} aria-hidden="true" />
+            </a>
+          </div>
+          <ol className="flow-steps">
+            {FLOW.map((step, i) => (
+              <li key={step.title} className="flow-step">
+                <span className="flow-num">{i + 1}</span>
+                <span className={`flow-icon ${step.logo ? "flow-icon-logo" : ""}`} aria-hidden="true">
+                  {step.logo ? <Logo size={46} className="logo" /> : step.icon && <step.icon size={26} />}
+                </span>
+                <h3>{step.title}</h3>
+                <p>{step.body}</p>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </section>
+
+      <section className="home-band" id="connect">
+        <div className="home-wrap home-split home-split-code">
+          <div className="home-split-copy">
+            <p className="eyebrow">Integrate in minutes</p>
+            <h2>Connect without rewriting your agent</h2>
+            <p className="home-lede">
+              Use Handrail with the tools and frameworks you already have. Point your MCP client at it, or swap PayPal's toolkit for
+              Handrail's drop-in and keep building.
+            </p>
+            <ul className="check-list">
+              <li>
+                <CircleCheck size={18} aria-hidden="true" /> Over MCP or plain HTTP
+              </li>
+              <li>
+                <CircleCheck size={18} aria-hidden="true" /> LangChain, CrewAI, Vercel AI SDK and LangChain JS
+              </li>
+              <li>
+                <CircleCheck size={18} aria-hidden="true" /> The agent gets a Handrail key, never PayPal credentials
+              </li>
+            </ul>
+          </div>
+          <CodePanel />
+        </div>
+      </section>
+
+      <section className="home-band home-band-tint" id="features">
+        <div className="home-wrap">
+          <div className="home-head">
+            <p className="eyebrow">Built for money that moves</p>
+            <h2>What Handrail does</h2>
+            <p className="home-lede">Rules decide. People approve. AI only explains.</p>
+          </div>
+          <ul className="feature-cards">
+            {FEATURES.map((f) => (
+              <li key={f.title} className="feature-card">
+                <span className="feature-card-icon" aria-hidden="true">
+                  <f.icon size={20} />
+                </span>
+                <h3>{f.title}</h3>
+                <p>{f.body}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
+
+      <section className="home-band" id="problem">
+        <div className="home-wrap">
+          <div className="home-head">
+            <p className="eyebrow">Why it's needed</p>
+            <h2>The toolkit alone can't say no</h2>
+            <p className="home-lede">
+              Connect an agent to PayPal's toolkit and it can move money on its own. The toolkit lets you switch whole tools on or off,
+              and that's the only control there is.
+            </p>
+          </div>
+          <ul className="problem-grid">
+            {PROBLEMS.map((p) => (
+              <li key={p.title}>
+                <h3>{p.title}</h3>
+                <p>{p.body}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
+
+      <section className="home-demo" id="demo">
+        <div className="home-wrap home-demo-inner">
+          <div className="home-demo-copy">
+            <p className="eyebrow eyebrow-mint">See it in action</p>
+            <h2>Run the demo</h2>
+            <p>
+              Sign in as an approver on PayPal's sandbox and run the demo agent. A small refund goes through. A large one waits for you,
+              with an AI brief. Its retry is caught. Three small refunds that add up too much are held. Approve or reject, then check the
+              record.
+            </p>
+            <div className="home-hero-actions">{primary}</div>
+          </div>
+          <DashboardMock />
+        </div>
       </section>
 
       <footer className="home-foot">
-        <span>Handrail · Built for PayPal's “Build What's Next with PayPal and AI” hackathon</span>
-        <span>Sandbox only. AI explains; your rules decide.</span>
+        <div className="home-wrap home-foot-inner">
+          <a className="home-foot-brand" {...link("/")}>
+            <Logo size={26} />
+            <span>Handrail</span>
+          </a>
+          <span>Built for PayPal's “Build What's Next with PayPal and AI” hackathon</span>
+          <span>Sandbox only. AI explains; your rules decide.</span>
+        </div>
       </footer>
     </div>
   );
 }
 
-const FEATURES = [
+/**
+ * Part of the hero at the top of the page; once the page scrolls, a floating
+ * rounded bar. Fixed throughout, so the switch never shifts the layout.
+ */
+function SiteNav({
+  auth,
+  session,
+  demo,
+  signInPath,
+  signInLabel,
+}: {
+  auth: AuthState;
+  session: Session | null;
+  demo: ReturnType<typeof useDemoSignIn>;
+  signInPath: string;
+  signInLabel: string;
+}) {
+  const sentinel = useRef<HTMLDivElement>(null);
+  const [floating, setFloating] = useState(false);
+  useEffect(() => {
+    const el = sentinel.current;
+    if (!el) return;
+    const io = new IntersectionObserver(([entry]) => setFloating(!entry!.isIntersecting));
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
+  return (
+    <>
+      <div ref={sentinel} className="site-nav-sentinel" aria-hidden="true" />
+      <header className={`site-nav ${floating ? "is-floating" : ""}`}>
+        <div className="site-nav-bar">
+          <a className="site-nav-brand" {...link("/")} aria-label="Handrail home">
+            <Logo size={44} className="logo site-nav-logo" />
+            <span>Handrail</span>
+          </a>
+          <nav className="site-nav-links" aria-label="Sections">
+            <a href="#product">Product</a>
+            <a href="#how">How it works</a>
+            <a href="#connect">Developers</a>
+            <a href="#demo">Demo</a>
+          </nav>
+          <div className="site-nav-actions">
+            <ThemeToggle className="site-nav-icon" />
+            {session ? (
+              <a className="site-nav-cta" {...link("/app")}>
+                Dashboard
+              </a>
+            ) : auth.demoAccess ? (
+              <>
+                <a className="site-nav-login" {...link(signInPath)}>
+                  {signInLabel}
+                </a>
+                <button className="site-nav-cta" onClick={demo.start} disabled={demo.busy}>
+                  {demo.busy ? "Opening…" : "Try the demo"}
+                </button>
+              </>
+            ) : (
+              <a className="site-nav-cta" {...link(signInPath)}>
+                {signInLabel}
+              </a>
+            )}
+          </div>
+        </div>
+      </header>
+    </>
+  );
+}
+
+const OUTCOMES: Array<{ title: string; sub: string; tone: "good" | "warn" | "bad"; icon: LucideIcon; points: string[] }> = [
   {
-    icon: "Σ",
-    title: "Running totals stop split refunds",
-    body: "Limits count what's already been refunded on the same payment, order, customer or agent, including requests still waiting for approval. Three small refunds that add up to a big one get held.",
+    title: "Allow",
+    sub: "Safe actions run automatically.",
+    tone: "good",
+    icon: Check,
+    points: ["Under your limits", "Sent once, with its own request id", "Matched to PayPal's webhook", "Fully logged"],
   },
   {
-    icon: "✓",
-    title: "Facts apart from claims",
-    body: "Approval cards show what PayPal confirmed (what was paid, what's been refunded, who paid, dispute deadlines) separately from what the agent says. The AI brief sticks to the confirmed facts.",
+    title: "Hold",
+    sub: "Sensitive actions wait for a person.",
+    tone: "warn",
+    icon: CirclePause,
+    points: ["Approvers alerted by email or Slack", "PayPal-verified facts and an AI brief", "Approve or reject in the dashboard", "Expires if nobody decides"],
   },
   {
-    icon: "!",
-    title: "Bypasses get noticed",
-    body: "If PayPal reports a refund, dispute concession or cancellation that didn't go through Handrail, it's flagged and you're alerted. That's how you find an agent that still has its own PayPal keys.",
-  },
-  {
-    icon: "✉",
-    title: "Alerts, and calls that expire",
-    body: "Approvers get an email or Slack message with a link to the held call. Nothing can be approved from the message itself. A call nobody decides expires and is never sent.",
-  },
-  {
-    icon: "1×",
-    title: "Retries never pay twice",
-    body: "Each request gets its own PayPal idempotency key, so a timed-out refund that the agent retries runs at most once. Held calls tell the agent not to retry.",
-  },
-  {
-    icon: "#",
-    title: "A record you can check",
-    body: "Every decision, approval and PayPal response is written to a hash-chained log, and PayPal's webhooks are matched back to the call that caused them.",
+    title: "Block",
+    sub: "Off-policy actions are stopped.",
+    tone: "bad",
+    icon: Ban,
+    points: ["Over a hard limit or rate", "Never sent to PayPal", "No one can approve past a block", "Fully logged"],
   },
 ];
 
-const MCP_SNIPPET = `{
-  "mcpServers": {
-    "paypal": {
-      "url": "https://your-handrail.example.com/mcp",
-      "headers": { "Authorization": "Bearer hr_agent_…" }
-    }
-  }
-}`;
-
-const DIFFS: Array<{ label: string; lines: Array<[" " | "-" | "+", string]> }> = [
+const FLOW: Array<{ title: string; body: string; icon?: LucideIcon; logo?: boolean }> = [
   {
-    label: "LangChain (Python)",
+    title: "Agent makes a PayPal call",
+    body: "Your agent calls create_refund or accept_dispute_claim as usual, with a Handrail key instead of PayPal credentials.",
+    icon: Bot,
+  },
+  {
+    title: "Handrail checks your rules",
+    body: "Amounts are looked up from PayPal, then limits, running totals, rate limits and payee rules decide: allow, hold or block.",
+    logo: true,
+  },
+  {
+    title: "A person decides when needed",
+    body: "Approvers see verified facts and an AI brief. Approved calls reach PayPal exactly once, even if the agent retries.",
+    icon: UserCheck,
+  },
+];
+
+const FEATURES: Array<{ icon: LucideIcon; title: string; body: string }> = [
+  {
+    icon: Sigma,
+    title: "Running totals stop split refunds",
+    body: "Limits count what's already been refunded on the same payment, order, customer or agent, including requests still waiting for approval.",
+  },
+  {
+    icon: Scale,
+    title: "Facts apart from claims",
+    body: "Approval cards show what PayPal confirmed separately from what the agent says. The AI brief sticks to the confirmed facts.",
+  },
+  {
+    icon: ShieldAlert,
+    title: "Bypasses get noticed",
+    body: "A refund, dispute concession or cancellation PayPal reports that didn't go through Handrail is flagged, and you're alerted.",
+  },
+  {
+    icon: Bell,
+    title: "Alerts, and calls that expire",
+    body: "Approvers get an email or Slack message with a link. Nothing can be approved from the message. Undecided calls expire.",
+  },
+  {
+    icon: Repeat2,
+    title: "Retries never pay twice",
+    body: "Each request gets its own PayPal idempotency key, so a refund the agent retries runs at most once.",
+  },
+  {
+    icon: Hash,
+    title: "A record you can check",
+    body: "Every decision, approval and PayPal response is hash-chained, and PayPal's webhooks are matched back to the calls that caused them.",
+  },
+];
+
+const PROBLEMS = [
+  { title: "Refunds go straight out.", body: "A confused or manipulated agent can refund any amount, as often as it likes." },
+  { title: "Disputes get conceded.", body: "One accept_dispute_claim call gives the money back to the buyer, and no one is asked first." },
+  { title: "Cancellations are instant.", body: "Invoices, subscriptions and recurring billing can be cancelled in a single call." },
+  { title: "No approvals or limits.", body: "There's no per-call ceiling, no daily cap, and no way to have a person sign off on a large refund." },
+  { title: "Retries can pay out twice.", body: "PayPal's idempotency id is set once per client, not per call, so a retried refund can run again." },
+  { title: "No record.", body: "Nothing shows what the agent asked for, who allowed it, or whether PayPal's events match." },
+];
+
+type DiffLine = [" " | "-" | "+", string];
+const SNIPPETS: Array<{ label: string; lang: string; icon?: LucideIcon; lines: DiffLine[] }> = [
+  {
+    label: "MCP",
+    lang: "JSON",
+    icon: Plug,
+    lines: [
+      [" ", "{"],
+      [" ", '  "mcpServers": {'],
+      [" ", '    "paypal": {'],
+      ["+", '      "url": "https://your-handrail.example.com/mcp",'],
+      ["+", '      "headers": { "Authorization": "Bearer hr_agent_…" }'],
+      [" ", "    }"],
+      [" ", "  }"],
+      [" ", "}"],
+    ],
+  },
+  {
+    label: "LangChain",
+    lang: "Python",
     lines: [
       ["-", "from paypal_agent_toolkit.langchain.toolkit import PayPalToolkit"],
       ["+", "from handrail_langchain import HandrailToolkit"],
@@ -236,17 +439,19 @@ const DIFFS: Array<{ label: string; lines: Array<[" " | "-" | "+", string]> }> =
   },
   {
     label: "CrewAI",
+    lang: "Python",
     lines: [
       ["-", "from paypal_agent_toolkit.crewai.toolkit import PayPalToolkit"],
       ["+", "from handrail_crewai import HandrailToolkit"],
       [" ", ""],
       ["-", "toolkit = PayPalToolkit(client_id=PAYPAL_CLIENT_ID, secret=PAYPAL_SECRET, configuration=configuration)"],
       ["+", "toolkit = HandrailToolkit(url=HANDRAIL_URL, agent_key=HANDRAIL_AGENT_KEY, configuration=configuration)"],
-      [" ", "agent = Agent(role=\"PayPal Assistant\", tools=toolkit.get_tools(), …)"],
+      [" ", 'agent = Agent(role="PayPal Assistant", tools=toolkit.get_tools(), …)'],
     ],
   },
   {
     label: "Vercel AI SDK",
+    lang: "TypeScript",
     lines: [
       ["-", "import { PayPalAgentToolkit, ALL_TOOLS_ENABLED } from '@paypal/agent-toolkit/ai-sdk';"],
       ["+", "import { HandrailAgentToolkit, ALL_TOOLS_ENABLED } from 'handrail-ai-sdk';"],
@@ -258,6 +463,7 @@ const DIFFS: Array<{ label: string; lines: Array<[" " | "-" | "+", string]> }> =
   },
   {
     label: "LangChain JS",
+    lang: "TypeScript",
     lines: [
       ["-", "import { PayPalAgentToolkit, ALL_TOOLS_ENABLED } from '@paypal/agent-toolkit/langchain';"],
       ["+", "import { HandrailAgentToolkit, ALL_TOOLS_ENABLED } from 'handrail-langchain';"],
@@ -269,56 +475,184 @@ const DIFFS: Array<{ label: string; lines: Array<[" " | "-" | "+", string]> }> =
   },
 ];
 
-/** Before/after for framework agents: the import and the constructor change, nothing else. */
-function FrameworkDiffs() {
+/** Before/after for each way of connecting: only the highlighted lines change. Copy takes the "after" version. */
+function CodePanel() {
   const [active, setActive] = useState(0);
-  const diff = DIFFS[active]!;
+  const snippet = SNIPPETS[active]!;
+  const after = snippet.lines
+    .filter(([sign]) => sign !== "-")
+    .map(([, text]) => text)
+    .join("\n");
   return (
-    <div className="connect-card">
-      <h3>Framework agents</h3>
-      <p>Swap PayPal's toolkit for Handrail's: the import and the constructor change, the tools stay the same.</p>
-      <div className="diff-tabs" role="tablist" aria-label="Framework">
-        {DIFFS.map((d, i) => (
-          <button key={d.label} role="tab" aria-selected={i === active} className={`diff-tab ${i === active ? "active" : ""}`} onClick={() => setActive(i)}>
-            {d.label}
-          </button>
-        ))}
+    <div className="code-panel">
+      <div className="code-panel-bar">
+        <div className="code-tabs" role="tablist" aria-label="How you connect">
+          {SNIPPETS.map((s, i) => (
+            <button key={s.label} role="tab" aria-selected={i === active} className={`code-tab ${i === active ? "active" : ""}`} onClick={() => setActive(i)}>
+              {s.icon && <s.icon size={15} aria-hidden="true" />}
+              {s.label}
+            </button>
+          ))}
+        </div>
+        <div className="code-panel-tools">
+          <span className="code-lang">{snippet.lang}</span>
+          <CopyButton text={after} label="Copy" className="code-copy" />
+        </div>
       </div>
-      <pre className="code code-diff" aria-label={`${diff.label}: before and after`}>
-        {diff.lines.map(([sign, text], i) => (
-          <span key={i} className={sign === "+" ? "add" : sign === "-" ? "del" : undefined}>
-            {sign === " " ? " " : sign} {text}
+      <pre className="code-body" aria-label={`${snippet.label}: before and after`}>
+        {snippet.lines.map(([sign, text], i) => (
+          <span key={i} className={`code-line ${sign === "+" ? "add" : sign === "-" ? "del" : ""}`}>
+            <span className="code-ln" aria-hidden="true">
+              {i + 1}
+            </span>
+            <span className="code-sign" aria-hidden="true">
+              {sign === " " ? "" : sign === "-" ? "−" : "+"}
+            </span>
+            <span className="code-text">{text || " "}</span>
             {"\n"}
           </span>
         ))}
       </pre>
+      <p className="code-panel-foot">
+        <CircleCheck size={16} aria-hidden="true" />
+        Same tools and schemas as PayPal's toolkit. Only the highlighted lines change.
+      </p>
     </div>
   );
 }
 
 /** An illustration of a held refund, as an approver sees it. Decorative only. */
 function HeroCard() {
+  const rows: Array<[LucideIcon, string, string, "ok" | "held"]> = [
+    [ReceiptText, "Rule", "Refunds over $100.00 need approval", "held"],
+    [ShieldCheck, "Idempotency", "One request id: sent once", "ok"],
+    [Hash, "Audit log", "Recorded in the hash chain", "ok"],
+  ];
   return (
     <div className="hero-card" aria-hidden="true">
-      <div className="hero-card-head">
-        <div>
-          <p className="card-kicker">Refund</p>
-          <p className="amount">250.00 USD</p>
+      <div className="hero-card-top">
+        <span className="hero-pill">
+          <span className="hero-pill-dot" />
+          Needs approval
+        </span>
+        <span className="hero-card-id">#apr_8f3c2e</span>
+      </div>
+      <div className="hero-card-panel">
+        <div className="hero-card-head">
+          <span className="hero-card-icon">
+            <Undo2 size={22} strokeWidth={2.2} />
+          </span>
+          <div className="hero-card-who">
+            <p className="hero-card-title">Refund payment</p>
+            <p>To Jordan Lee</p>
+            <p className="hero-card-email">jordan.lee@example.com</p>
+          </div>
+          <div className="hero-card-amount num">
+            $250.00
+            <span>USD</span>
+          </div>
         </div>
-        <Pill tone="warn">Needs approval</Pill>
+        <p className="hero-card-label">
+          <Sparkles size={14} /> AI brief
+        </p>
+        <p className="hero-card-brief">
+          PayPal confirms a $250.00 card payment with nothing refunded yet. The agent says the item arrived damaged; that isn't verified,
+          so check it before approving.
+        </p>
+        <ul className="hero-card-rows">
+          {rows.map(([Icon, label, text, state]) => (
+            <li key={label}>
+              <Icon size={18} />
+              <span className="hero-card-row-label">{label}</span>
+              <span className="hero-card-row-text">{text}</span>
+              <span className={`hero-card-state hero-card-state-${state}`}>{state === "ok" ? <Check size={13} strokeWidth={3} /> : <Clock size={13} strokeWidth={2.6} />}</span>
+            </li>
+          ))}
+        </ul>
       </div>
-      <div className="why">
-        <p className="why-label">Why it was held</p>
-        <p>Refunds over 100.00 USD need a person to approve them.</p>
-      </div>
-      <div className="hero-card-ai">
-        <span className="ai-label">✦ AI brief</span>
-        <p>The agent wants to refund 250.00 USD on one capture. Check that the customer asked for it before approving.</p>
-      </div>
-      <div className="decide-buttons">
-        <span className="btn btn-secondary">Reject</span>
-        <span className="btn btn-primary">Approve</span>
+      <div className="hero-card-actions">
+        <span className="hero-card-approve">
+          <Check size={20} strokeWidth={2.6} /> Approve refund
+        </span>
+        <span className="hero-card-reject">
+          <X size={20} strokeWidth={2.4} /> Reject
+        </span>
       </div>
     </div>
+  );
+}
+
+/** A small picture of the dashboard's approval queue. Decorative only. */
+function DashboardMock() {
+  const nav = ["Dashboard", "Approvals", "Activity", "Webhooks", "Audit log", "Policy"];
+  const rows: Array<[string, string, string, ReactNode]> = [
+    ["Refund", "$250.00", "22 min left", <span className="mock-pill mock-warn">Needs approval</span>],
+    ["Accept dispute", "$180.00", "1 h 14 min left", <span className="mock-pill mock-warn">Needs approval</span>],
+    ["Refund", "$5.00", "Sent to PayPal", <span className="mock-pill mock-good">Allowed</span>],
+    ["Refund (retry)", "$250.00", "Not re-sent", <span className="mock-pill mock-info">Duplicate</span>],
+  ];
+  return (
+    <div className="dash-mock" aria-hidden="true">
+      <div className="dash-mock-bar">
+        <Logo size={18} />
+        <span className="dash-mock-name">Handrail</span>
+        <span className="dash-mock-tabs">
+          <b>Approvals</b>
+          <span>Activity</span>
+          <span>Audit log</span>
+        </span>
+        <span className="dash-mock-live">
+          <span className="hero-pill-dot" /> Sandbox
+        </span>
+      </div>
+      <div className="dash-mock-body">
+        <ul className="dash-mock-nav">
+          {nav.map((n) => (
+            <li key={n} className={n === "Approvals" ? "active" : undefined}>
+              {n}
+            </li>
+          ))}
+        </ul>
+        <div className="dash-mock-main">
+          <p className="dash-mock-title">Approvals</p>
+          <ul className="dash-mock-rows">
+            {rows.map(([tool, amount, meta, pill], i) => (
+              <li key={i}>
+                <span className="dash-mock-tool">
+                  {tool}
+                  <small>{meta}</small>
+                </span>
+                <span className="num">{amount}</span>
+                {pill}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Sweeping handrail curves behind the hero copy. Decorative only. */
+export function RailArt() {
+  return (
+    <svg className="rail-art" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
+      <defs>
+        <linearGradient id="rail-a" x1="0" y1="1" x2="1" y2="0">
+          <stop offset="0" stopColor="#8fe3b0" stopOpacity="0" />
+          <stop offset="0.45" stopColor="#8fe3b0" stopOpacity="0.55" />
+          <stop offset="1" stopColor="#d6f5e3" stopOpacity="0.15" />
+        </linearGradient>
+        <linearGradient id="rail-b" x1="0" y1="1" x2="1" y2="0">
+          <stop offset="0" stopColor="#ffffff" stopOpacity="0" />
+          <stop offset="0.6" stopColor="#ffffff" stopOpacity="0.22" />
+          <stop offset="1" stopColor="#ffffff" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d="M-120 960 C 280 700, 760 600, 1580 120" stroke="url(#rail-a)" strokeWidth="14" fill="none" strokeLinecap="round" />
+      <path d="M-120 1010 C 300 760, 790 660, 1580 190" stroke="url(#rail-b)" strokeWidth="3" fill="none" />
+      <path d="M-120 1080 C 330 830, 830 740, 1580 290" stroke="url(#rail-b)" strokeWidth="1.5" fill="none" />
+      <path d="M380 -60 C 640 160, 1000 260, 1580 300" stroke="url(#rail-b)" strokeWidth="1.2" fill="none" opacity="0.6" />
+    </svg>
   );
 }

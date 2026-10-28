@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Check, Copy, Eye, EyeOff, Moon, Sun } from "lucide-react";
+import { useEffect, useRef, useState, type InputHTMLAttributes, type ReactNode } from "react";
 import { setTheme, useTheme } from "./theme";
 
 const DECISION_LABELS: Record<string, [string, string]> = {
@@ -146,12 +147,47 @@ export function Logo({ size = 28, className = "logo" }: { size?: number; classNa
 }
 
 /** Switches between the light (default) and dark themes. */
-export function ThemeToggle() {
+export function ThemeToggle({ className = "btn btn-ghost theme-toggle" }: { className?: string }) {
   const theme = useTheme();
   const next = theme === "dark" ? "light" : "dark";
   return (
-    <button className="btn btn-ghost theme-toggle" onClick={() => setTheme(next)} aria-label={`Switch to ${next} mode`} title={`Switch to ${next} mode`}>
-      {theme === "dark" ? "☀" : "☾"}
+    <button className={className} onClick={() => setTheme(next)} aria-label={`Switch to ${next} mode`} title={`Switch to ${next} mode`}>
+      {theme === "dark" ? <Sun size={16} aria-hidden="true" /> : <Moon size={16} aria-hidden="true" />}
+    </button>
+  );
+}
+
+/** A password input with a show/hide button. Other props go to the <input>. */
+export function PasswordInput(props: InputHTMLAttributes<HTMLInputElement>) {
+  const [shown, setShown] = useState(false);
+  return (
+    <span className="password-field">
+      <input {...props} className={props.className ?? "input"} type={shown ? "text" : "password"} />
+      <button type="button" className="password-toggle" onClick={() => setShown(!shown)} aria-label={shown ? "Hide password" : "Show password"} aria-pressed={shown}>
+        {shown ? <EyeOff size={17} aria-hidden="true" /> : <Eye size={17} aria-hidden="true" />}
+      </button>
+    </span>
+  );
+}
+
+/** Copies `text` to the clipboard; says "Copied" for a moment. */
+export function CopyButton({ text, label = "Copy", className = "btn btn-secondary" }: { text: string; label?: string; className?: string }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(false), 1600);
+    return () => clearTimeout(t);
+  }, [copied]);
+  return (
+    <button
+      type="button"
+      className={className}
+      onClick={() => navigator.clipboard.writeText(text).then(() => setCopied(true), () => {})}
+      aria-label={copied ? "Copied" : label}
+      title={label}
+    >
+      {copied ? <Check size={15} aria-hidden="true" /> : <Copy size={15} aria-hidden="true" />}
+      <span className="copy-label">{copied ? "Copied" : label}</span>
     </button>
   );
 }
