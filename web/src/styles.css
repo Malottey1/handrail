@@ -8058,3 +8058,17 @@ a.btn {
     margin-left: auto;
   }
 }
+
+@media (max-width: 760px) {
+  .composer-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .composer-actions .example {
+    text-align: left;
+  }
+  .composer-actions > .btn {
+    justify-content: center;
+  }
+}
