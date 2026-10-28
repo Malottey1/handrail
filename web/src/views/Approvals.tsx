@@ -283,7 +283,7 @@ export function ApprovalsView({
  * The AI-written brief. Shown below the facts, and labelled as advisory: the
  * rules decided to hold the call, and only a person decides.
  */
-function AiBrief({ approval: a }: { approval: Approval }) {
+export function AiBrief({ approval: a }: { approval: Approval }) {
   const status = a.explanationStatus;
   if (!status || status === "unavailable") return null;
   const e = a.explanation;
@@ -413,7 +413,7 @@ export function Verified({ verified: v }: { verified: VerifiedFacts | null }) {
 const FIELD_WORDS: Record<string, string> = { note_to_payer: "Note to the customer", reason: "Reason", note: "Note" };
 
 /** The agent's own words, quoted and marked unverified. Never shown as fact. */
-function AgentSays({ approval: a }: { approval: Approval }) {
+export function AgentSays({ approval: a }: { approval: Approval }) {
   if (!a.agentSays?.length) return null;
   return (
     <section className="agent-says">

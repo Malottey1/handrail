@@ -3,8 +3,12 @@ import {
   ClientSideRowModelModule,
   colorSchemeDark,
   colorSchemeLight,
+  CsvExportModule,
+  EventApiModule,
   ModuleRegistry,
   NumberFilterModule,
+  PaginationModule,
+  RowSelectionModule,
   RowStyleModule,
   TextFilterModule,
   themeQuartz,
@@ -22,6 +26,10 @@ ModuleRegistry.registerModules([
   TooltipModule,
   RowStyleModule,
   CellStyleModule,
+  PaginationModule,
+  RowSelectionModule,
+  CsvExportModule,
+  EventApiModule,
   ...(import.meta.env.DEV ? [ValidationModule] : []),
 ]);
 
@@ -29,11 +37,17 @@ ModuleRegistry.registerModules([
 // green tint; status colours stay in the cell renderers.
 const base = themeQuartz.withParams({
   fontFamily: "inherit",
-  fontSize: 13,
+  fontSize: 13.5,
+  headerFontSize: 13,
   headerFontWeight: 600,
   borderRadius: 6,
-  wrapperBorderRadius: 10,
+  wrapperBorder: false,
+  wrapperBorderRadius: 0,
   spacing: 7,
+  rowHeight: 52,
+  headerHeight: 46,
+  cellHorizontalPadding: 14,
+  checkboxBorderRadius: 4,
 });
 
 const light = base.withPart(colorSchemeLight).withParams({
@@ -41,7 +55,7 @@ const light = base.withPart(colorSchemeLight).withParams({
   backgroundColor: "#ffffff",
   foregroundColor: "#1b211d",
   borderColor: "#dfe4e0",
-  headerBackgroundColor: "#f5f7f5",
+  headerBackgroundColor: "#ffffff",
   headerTextColor: "#4b554e",
   rowHoverColor: "#eef6f1",
   selectedRowBackgroundColor: "#e0efe5",
@@ -53,7 +67,7 @@ const dark = base.withPart(colorSchemeDark).withParams({
   backgroundColor: "#151a17",
   foregroundColor: "#e5ebe6",
   borderColor: "#2a332d",
-  headerBackgroundColor: "#1b211d",
+  headerBackgroundColor: "#151a17",
   headerTextColor: "#b4beb6",
   rowHoverColor: "#1a2b20",
   selectedRowBackgroundColor: "#1e3627",

@@ -251,14 +251,14 @@ function Dashboard({ session, onSignOut, onUserChange }: { session: Session; onS
           )}
 
           <main className="page">
-            {shown !== "dashboard" && shown !== "approvals" && <PageHeader title={page.label} subtitle={page.subtitle} />}
+            {!["dashboard", "approvals", "activity", "webhooks", "audit"].includes(shown) && <PageHeader title={page.label} subtitle={page.subtitle} />}
             {shown === "dashboard" && <DashboardView session={session} summary={s} />}
             {shown === "approvals" && (
               <ApprovalsView session={session} onChange={summary.refresh} focus={focus} search={search} title={page.label} subtitle={page.subtitle} />
             )}
-            {shown === "activity" && <ActivityView session={session} />}
-            {shown === "webhooks" && <WebhooksView session={session} />}
-            {shown === "audit" && <AuditView session={session} verify={verify.data} />}
+            {shown === "activity" && <ActivityView session={session} title={page.label} subtitle={page.subtitle} />}
+            {shown === "webhooks" && <WebhooksView session={session} title={page.label} subtitle={page.subtitle} />}
+            {shown === "audit" && <AuditView session={session} verify={verify.data} onVerify={verify.refresh} title={page.label} subtitle={page.subtitle} />}
             {shown === "policy" && <PolicyView session={session} />}
             {shown === "setup" && <SetupView session={session} />}
             {shown === "team" && <TeamView session={session} />}
