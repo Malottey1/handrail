@@ -4,6 +4,7 @@ import type { AgentIdentity } from "./auth/agent-keys.js";
 import type { Outcome } from "./idempotency.js";
 import { refundScope } from "./policy/engine.js";
 import type { CallFacts, Evaluation, HistoryEntry, RefundEntry } from "./policy/types.js";
+import type { StatsRow } from "./stats.js";
 
 /** What happened to a call: PayPal's outcome if forwarded, otherwise why not. */
 export type CallOutcome = Outcome | "blocked" | "held" | "expired" | "duplicate";
@@ -209,6 +210,13 @@ export class CallLog {
     return this.db
       .prepare(`SELECT decision, outcome, count(*) AS n FROM tool_calls WHERE at_ms > ? GROUP BY decision, outcome`)
       .all(sinceMs) as Array<{ decision: string; outcome: string | null; n: number }>;
+  }
+
+  /** The columns the dashboard's activity figures need, for calls since `sinceMs`. */
+  statsRows(sinceMs: number): StatsRow[] {
+    return this.db
+      .prepare(`SELECT at_ms, tool, decision, outcome, forwarded, amount_hundredths, currency FROM tool_calls WHERE at_ms > ?`)
+      .all(sinceMs) as unknown as StatsRow[];
   }
 
   /** Every call since `sinceMs`, newest first (context for AI explanations). */

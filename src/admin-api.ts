@@ -26,6 +26,7 @@ import { SettingsError, type SettingsStore } from "./notify/settings.js";
 import { agentClaims } from "./policy/claims.js";
 import { PolicyConflictError } from "./policy/store.js";
 import { redact } from "./redact.js";
+import { activityStats, COUNTERS } from "./stats.js";
 import type { MatchStatus } from "./webhooks.js";
 import type { Workspace } from "./workspace.js";
 
@@ -153,13 +154,13 @@ function summary(ws: ApiWorkspace) {
   return {
     pendingApprovals: ws.gate.listApprovals("pending").length,
     last24h: {
-      calls: total(() => true),
-      forwarded: total((c) => c.decision !== "duplicate" && c.outcome !== "held" && c.outcome !== "expired" && c.outcome !== "blocked"),
-      held: total((c) => c.outcome === "held"),
-      expired: total((c) => c.outcome === "expired"),
-      blocked: total((c) => c.decision === "block" || c.outcome === "blocked"),
-      duplicates: total((c) => c.decision === "duplicate"),
-      failed: total((c) => c.outcome === "failed" || c.outcome === "unknown"),
+      calls: total(COUNTERS.calls),
+      forwarded: total(COUNTERS.forwarded),
+      held: total(COUNTERS.held),
+      expired: total(COUNTERS.expired),
+      blocked: total(COUNTERS.blocked),
+      duplicates: total(COUNTERS.duplicates),
+      failed: total(COUNTERS.failed),
     },
     webhooks: {
       total: webhooks.length,
@@ -217,7 +218,7 @@ const actorRef = (principal: Principal) => ({ id: principal.user.id, name: princ
  *
  * Public:   GET  /api/auth/session, GET /api/auth/invite?token=
  *           POST /api/auth/signup, /api/auth/login, /api/auth/demo
- * viewer:   GET  /api/summary, /api/approvals[/:id], /api/calls, /api/webhooks, /api/unattributed, /api/setup,
+ * viewer:   GET  /api/summary, /api/stats/activity, /api/approvals[/:id], /api/calls, /api/webhooks, /api/unattributed, /api/setup,
  *                /api/audit, /api/audit/verify, /api/policy
  *           POST /api/auth/logout; PATCH /api/me, /api/me/alerts; POST /api/me/password
  *           GET/POST /api/demo/run (demo account only: the demo agent)
@@ -506,6 +507,15 @@ export function createAdminApi(deps: AdminDeps): (req: IncomingMessage, res: Ser
     } },
 
     { method: "GET", path: "summary", role: "viewer", handle: ({ res, ws }) => send(res, 200, summary(ws)) },
+
+    // Hourly counts and money moved, for this window and the one before it (the dashboard's chart and trends).
+    { method: "GET", path: "stats/activity", role: "viewer", handle: ({ res, url, ws }) => {
+      const hours = Math.min(Math.max(Math.round(Number(url.searchParams.get("hours")) || 24), 1), 168);
+      const tool = url.searchParams.get("tool");
+      if (tool !== null && !/^[a-z_]{1,64}$/.test(tool)) throw new HttpError(400, "Invalid tool");
+      const now = Date.now();
+      send(res, 200, activityStats(ws.callLog.statsRows(now - 2 * hours * 60 * 60 * 1000), { now, hours, tool }));
+    } },
 
     { method: "GET", path: "setup", role: "viewer", handle: ({ res, ws, principal }) =>
       send(res, 200, setupChecklist(ws, principal.kind === "session" && principal.user.isDemo)) },
