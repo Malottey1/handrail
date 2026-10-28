@@ -549,7 +549,7 @@ describe("admin API errors", () => {
     const secret = "cfg" + "Z5".repeat(20);
     registerSecrets(secret);
     const { base, callLog } = await setup();
-    callLog.recent = () => {
+    callLog.page = () => {
       throw new Error(`SQLITE_CORRUPT in /srv/handrail/src/audit.ts with ${secret}`);
     };
     const browser = new Browser(base);
@@ -848,5 +848,60 @@ describe("auth: agent keys on /mcp", () => {
     const decided = audit.list(10, `call:${call.id}`).find((e) => e.kind === "call.decided")!;
     assert.deepEqual(JSON.parse(decided.data_json).agent, { keyId: created.data.key.id, name: "Support bot" });
     assert.equal(audit.verify().ok, true);
+  });
+});
+
+describe("read-only list endpoints: paging, dates and webhook detail", () => {
+  it("pages calls and audit entries back with `before`, narrows them with `since`, and rejects bad values", async () => {
+    const ctx = await setup();
+    const admin = ctx.browser();
+    await admin.signup("Malcolm Clottey", "malcolm@example.com");
+    for (let i = 0; i < 3; i++) await ctx.gate.handle("list_invoices", { page: i + 1 });
+
+    const all = (await admin.req("GET", "/api/calls")).data as Array<{ id: number }>;
+    assert.equal(all.length, 3);
+    const older = (await admin.req("GET", `/api/calls?limit=5&before=${all[0]!.id}`)).data as Array<{ id: number }>;
+    assert.deepEqual(older.map((c) => c.id), all.slice(1).map((c) => c.id));
+    assert.deepEqual((await admin.req("GET", `/api/calls?since=${Date.now() + 60_000}`)).data, []);
+    assert.equal((await admin.req("GET", "/api/calls?since=yesterday-ish")).status, 400);
+    assert.equal((await admin.req("GET", "/api/calls?before=-1")).status, 400);
+
+    const entries = (await admin.req("GET", "/api/audit")).data as Array<{ seq: number }>;
+    const page = (await admin.req("GET", `/api/audit?limit=2&before=${entries[0]!.seq}`)).data as Array<{ seq: number }>;
+    assert.deepEqual(page.map((e) => e.seq), [entries[0]!.seq - 1, entries[0]!.seq - 2]);
+    assert.deepEqual((await admin.req("GET", `/api/audit?since=${new Date(Date.now() + 60_000).toISOString()}`)).data, []);
+    assert.equal((await admin.req("GET", "/api/audit/first")).data.seq, 1);
+  });
+
+  it("counts webhooks by status and returns one event with its payload, secrets removed", async () => {
+    const ctx = await setup();
+    const admin = ctx.browser();
+    await admin.signup("Malcolm Clottey", "malcolm@example.com");
+    const event = {
+      id: "WH-DETAIL-1",
+      event_type: "PAYMENT.CAPTURE.REFUNDED",
+      summary: "A refund",
+      resource: {
+        id: "REFUND9",
+        status: "COMPLETED",
+        amount: { currency_code: "USD", value: "12.00" },
+        note: "Authorization: Bearer " + "A21AA" + "x".repeat(40),
+        links: [{ rel: "up", href: "https://api.sandbox.paypal.com/v2/payments/captures/CAPTURE9" }],
+      },
+    };
+    assert.equal((await fetch(`${ctx.base}/webhooks/paypal`, { method: "POST", body: JSON.stringify(event) })).status, 200);
+
+    const counts = (await admin.req("GET", "/api/webhooks/counts")).data;
+    assert.deepEqual(counts, { matched: 0, mismatch: 0, outside_handrail: 1, unrelated: 0, ignored: 0 });
+    assert.deepEqual((await admin.req("GET", `/api/webhooks/counts?since=${Date.now() + 60_000}`)).data.outside_handrail, 0);
+    assert.equal((await admin.req("GET", "/api/webhooks?limit=1")).data.length, 1);
+
+    const detail = await admin.req("GET", "/api/webhooks/WH-DETAIL-1");
+    assert.equal(detail.status, 200);
+    assert.equal(detail.data.status, "outside_handrail");
+    assert.deepEqual(detail.data.amount, { currency: "USD", hundredths: 1200 });
+    assert.equal(detail.data.raw.resource.id, "REFUND9");
+    assert.ok(!JSON.stringify(detail.data).includes("A21AA" + "x".repeat(40)));
+    assert.equal((await admin.req("GET", "/api/webhooks/WH-NOPE")).status, 404);
   });
 });

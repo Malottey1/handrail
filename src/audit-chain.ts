@@ -139,11 +139,22 @@ export class AuditChain {
     this.record(now, () => ({ value: undefined, entries: [entry] }));
   }
 
-  list(limit = 100, ref?: string): AuditRow[] {
-    const rows = ref
-      ? this.db.prepare(`SELECT * FROM audit_chain WHERE ref = ? ORDER BY seq DESC LIMIT ?`).all(ref, limit)
-      : this.db.prepare(`SELECT * FROM audit_chain ORDER BY seq DESC LIMIT ?`).all(limit);
-    return rows as unknown as AuditRow[];
+  /** Newest first; `since` (ISO time) and `beforeSeq` narrow it for paging back. */
+  list(limit = 100, ref?: string, { since, beforeSeq }: { since?: string; beforeSeq?: number } = {}): AuditRow[] {
+    const where = ["seq < ?", "at >= ?"];
+    const args: Array<string | number> = [beforeSeq ?? Number.MAX_SAFE_INTEGER, since ?? ""];
+    if (ref) {
+      where.push("ref = ?");
+      args.push(ref);
+    }
+    return this.db
+      .prepare(`SELECT * FROM audit_chain WHERE ${where.join(" AND ")} ORDER BY seq DESC LIMIT ?`)
+      .all(...args, limit) as unknown as AuditRow[];
+  }
+
+  /** The oldest entry, for "first entry" on the dashboard. */
+  first(): AuditRow | null {
+    return (this.db.prepare(`SELECT * FROM audit_chain ORDER BY seq LIMIT 1`).get() as unknown as AuditRow | undefined) ?? null;
   }
 
   /** Recomputes every hash, then checks the working tables against the chain. */

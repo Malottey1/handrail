@@ -270,6 +270,13 @@ export class CallLog {
   recent(limit: number): CallRow[] {
     return this.db.prepare(`SELECT * FROM tool_calls ORDER BY id DESC LIMIT ?`).all(limit) as unknown as CallRow[];
   }
+
+  /** Newest first, made after `sinceMs` and older than call `beforeId` (for paging back). */
+  page(limit: number, { sinceMs, beforeId }: { sinceMs?: number; beforeId?: number } = {}): CallRow[] {
+    return this.db
+      .prepare(`SELECT * FROM tool_calls WHERE at_ms > ? AND id < ? ORDER BY id DESC LIMIT ?`)
+      .all(sinceMs ?? -1, beforeId ?? Number.MAX_SAFE_INTEGER, limit) as unknown as CallRow[];
+  }
 }
 
 function addColumns(db: DatabaseSync, columns: Record<string, string>): void {

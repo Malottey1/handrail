@@ -213,6 +213,8 @@ export interface StoredEvent {
   reasons_json: string;
 }
 
+const EVENT_COLS = "event_id, received_at, event_type, summary, resource_id, verified, status, tool, call_id, reasons_json";
+
 export class WebhookStore {
   constructor(
     private readonly db: DatabaseSync,
@@ -309,11 +311,38 @@ export class WebhookStore {
     });
   }
 
-  list(status?: MatchStatus, limit = 100): StoredEvent[] {
-    const cols = "event_id, received_at, event_type, summary, resource_id, verified, status, tool, call_id, reasons_json";
+  list(status?: MatchStatus, limit = 100, since?: string): StoredEvent[] {
     const rows = status
-      ? this.db.prepare(`SELECT ${cols} FROM webhook_events WHERE status = ? ORDER BY received_at DESC LIMIT ?`).all(status, limit)
-      : this.db.prepare(`SELECT ${cols} FROM webhook_events ORDER BY received_at DESC LIMIT ?`).all(limit);
+      ? this.db.prepare(`SELECT ${EVENT_COLS} FROM webhook_events WHERE status = ? AND received_at >= ? ORDER BY received_at DESC LIMIT ?`).all(status, since ?? "", limit)
+      : this.db.prepare(`SELECT ${EVENT_COLS} FROM webhook_events WHERE received_at >= ? ORDER BY received_at DESC LIMIT ?`).all(since ?? "", limit);
     return rows as unknown as StoredEvent[];
+  }
+
+  /** How many events received since `since` (ISO time) have each status. */
+  counts(since?: string): Record<MatchStatus, number> {
+    const counts: Record<MatchStatus, number> = { matched: 0, mismatch: 0, outside_handrail: 0, unrelated: 0, ignored: 0 };
+    const rows = this.db
+      .prepare(`SELECT status, COUNT(*) AS n FROM webhook_events WHERE received_at >= ? GROUP BY status`)
+      .all(since ?? "") as Array<{ status: MatchStatus; n: number }>;
+    for (const r of rows) counts[r.status] = r.n;
+    return counts;
+  }
+
+  /** One event with PayPal's body (parsed, or the raw text if it isn't JSON) and the amount it reports. */
+  get(eventId: string): (StoredEvent & { raw: unknown; amount: Money | null }) | null {
+    const row = this.db.prepare(`SELECT ${EVENT_COLS}, raw_json FROM webhook_events WHERE event_id = ?`).get(eventId) as
+      | (StoredEvent & { raw_json: string })
+      | undefined;
+    if (!row) return null;
+    const { raw_json, ...event } = row;
+    let raw: unknown = raw_json;
+    let amount: Money | null = null;
+    try {
+      raw = JSON.parse(raw_json);
+      amount = EVENT_RULES[event.event_type]?.amount?.((raw as WebhookEvent).resource ?? {}) ?? null;
+    } catch {
+      // Stored raw body that isn't JSON: shown as text, no amount.
+    }
+    return { ...event, raw, amount };
   }
 }

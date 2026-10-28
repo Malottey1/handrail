@@ -25,7 +25,7 @@ import type { AlertRecord } from "./notify/notifier.js";
 import { SettingsError, type SettingsStore } from "./notify/settings.js";
 import { agentClaims } from "./policy/claims.js";
 import { PolicyConflictError } from "./policy/store.js";
-import { redact } from "./redact.js";
+import { redact, redactDeep } from "./redact.js";
 import { activityStats, COUNTERS } from "./stats.js";
 import type { MatchStatus } from "./webhooks.js";
 import type { Workspace } from "./workspace.js";
@@ -189,6 +189,23 @@ type Route = {
   handle: (ctx: Ctx & { principal: Principal; params: string[]; ws: ApiWorkspace }) => Promise<void> | void;
 };
 
+/** An ISO time from the query string (also accepts epoch ms), as ISO; 400 if it isn't one. */
+function timeParam(url: URL, name: string): string | undefined {
+  const value = url.searchParams.get(name);
+  if (value === null || value === "") return undefined;
+  const ms = /^\d+$/.test(value) ? Number(value) : Date.parse(value);
+  if (!Number.isFinite(ms)) throw new HttpError(400, `Invalid ${name}`);
+  return new Date(ms).toISOString();
+}
+
+/** A positive whole number from the query string; 400 if it isn't one. */
+function intParam(url: URL, name: string): number | undefined {
+  const value = url.searchParams.get(name);
+  if (value === null || value === "") return undefined;
+  if (!/^\d{1,15}$/.test(value)) throw new HttpError(400, `Invalid ${name}`);
+  return Number(value);
+}
+
 function match(route: Route, method: string, parts: string[]): string[] | null {
   const pattern = route.path.split("/").filter(Boolean);
   if (route.method !== method || pattern.length !== parts.length - 1) return null;
@@ -218,8 +235,8 @@ const actorRef = (principal: Principal) => ({ id: principal.user.id, name: princ
  *
  * Public:   GET  /api/auth/session, GET /api/auth/invite?token=
  *           POST /api/auth/signup, /api/auth/login, /api/auth/demo
- * viewer:   GET  /api/summary, /api/stats/activity, /api/approvals[/:id], /api/calls, /api/webhooks, /api/unattributed, /api/setup,
- *                /api/audit, /api/audit/verify, /api/policy
+ * viewer:   GET  /api/summary, /api/stats/activity, /api/approvals[/:id], /api/calls, /api/webhooks[/counts|/:id], /api/unattributed, /api/setup,
+ *                /api/audit, /api/audit/first, /api/audit/verify, /api/policy
  *           POST /api/auth/logout; PATCH /api/me, /api/me/alerts; POST /api/me/password
  *           GET/POST /api/demo/run (demo account only: the demo agent)
  * approver: POST /api/approvals/:id/approve | reject
@@ -555,18 +572,36 @@ export function createAdminApi(deps: AdminDeps): (req: IncomingMessage, res: Ser
 
     { method: "GET", path: "calls", role: "viewer", handle: ({ res, url, ws }) => {
       const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 50, 1), 500);
-      send(res, 200, ws.callLog.recent(limit));
+      const since = timeParam(url, "since");
+      send(res, 200, ws.callLog.page(limit, { sinceMs: since ? Date.parse(since) : undefined, beforeId: intParam(url, "before") }));
     } },
 
     { method: "GET", path: "webhooks", role: "viewer", handle: ({ res, url, ws }) => {
       const status = (url.searchParams.get("status") as MatchStatus | null) ?? undefined;
-      send(res, 200, ws.webhooks.list(status).map(({ reasons_json, ...e }) => ({ ...e, reasons: JSON.parse(reasons_json) })));
+      const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 100, 1), 500);
+      const rows = ws.webhooks.list(status, limit, timeParam(url, "since"));
+      send(res, 200, rows.map(({ reasons_json, ...e }) => ({ ...e, reasons: JSON.parse(reasons_json) })));
+    } },
+
+    { method: "GET", path: "webhooks/counts", role: "viewer", handle: ({ res, url, ws }) =>
+      send(res, 200, ws.webhooks.counts(timeParam(url, "since"))) },
+
+    { method: "GET", path: "webhooks/:id", role: "viewer", handle: ({ res, params, ws }) => {
+      const event = ws.webhooks.get(params[0]!);
+      if (!event) return send(res, 404, { error: "Not found" });
+      const { reasons_json, raw, ...e } = event;
+      send(res, 200, { ...e, reasons: JSON.parse(reasons_json), raw: redactDeep(raw) });
     } },
 
     { method: "GET", path: "audit", role: "viewer", handle: ({ res, url, ws }) => {
       const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 100, 1), 1000);
-      const rows = ws.audit.list(limit, url.searchParams.get("ref") ?? undefined);
+      const rows = ws.audit.list(limit, url.searchParams.get("ref") ?? undefined, { since: timeParam(url, "since"), beforeSeq: intParam(url, "before") });
       send(res, 200, rows.map(({ data_json, ...r }) => ({ ...r, data: JSON.parse(data_json) })));
+    } },
+
+    { method: "GET", path: "audit/first", role: "viewer", handle: ({ res, ws }) => {
+      const row = ws.audit.first();
+      send(res, 200, row && { seq: row.seq, at: row.at });
     } },
 
     { method: "GET", path: "audit/verify", role: "viewer", handle: ({ res, ws }) => send(res, 200, ws.audit.verify()) },
