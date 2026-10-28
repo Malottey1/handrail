@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { api, ApiError, can, type AlertChannels, type AuthState, type Session, type Summary, type User, type VerifyResult } from "./api";
-import { Logo, PageHeader, usePoll } from "./components";
+import { Logo, usePoll } from "./components";
 import { link, navigate, usePath } from "./router";
 import { setTheme, useTheme } from "./theme";
 import { AccountView } from "./views/Account";
@@ -251,7 +251,6 @@ function Dashboard({ session, onSignOut, onUserChange }: { session: Session; onS
           )}
 
           <main className="page">
-            {!["dashboard", "approvals", "activity", "webhooks", "audit"].includes(shown) && <PageHeader title={page.label} subtitle={page.subtitle} />}
             {shown === "dashboard" && <DashboardView session={session} summary={s} />}
             {shown === "approvals" && (
               <ApprovalsView session={session} onChange={summary.refresh} focus={focus} search={search} title={page.label} subtitle={page.subtitle} />
@@ -259,10 +258,10 @@ function Dashboard({ session, onSignOut, onUserChange }: { session: Session; onS
             {shown === "activity" && <ActivityView session={session} title={page.label} subtitle={page.subtitle} />}
             {shown === "webhooks" && <WebhooksView session={session} title={page.label} subtitle={page.subtitle} />}
             {shown === "audit" && <AuditView session={session} verify={verify.data} onVerify={verify.refresh} title={page.label} subtitle={page.subtitle} />}
-            {shown === "policy" && <PolicyView session={session} />}
-            {shown === "setup" && <SetupView session={session} />}
-            {shown === "team" && <TeamView session={session} />}
-            {shown === "account" && <AccountView session={session} onUserChange={onUserChange} />}
+            {shown === "policy" && <PolicyView session={session} title={page.label} subtitle={page.subtitle} />}
+            {shown === "setup" && <SetupView session={session} title={page.label} subtitle={page.subtitle} />}
+            {shown === "team" && <TeamView session={session} title={page.label} subtitle={page.subtitle} />}
+            {shown === "account" && <AccountView session={session} onUserChange={onUserChange} title={page.label} subtitle={page.subtitle} />}
           </main>
         </div>
       </div>
