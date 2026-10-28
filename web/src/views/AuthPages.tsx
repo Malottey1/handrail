@@ -69,9 +69,13 @@ function AuthShell({ side, aside, children }: { side: Side; aside: ReactNode; ch
   return (
     <div className={`auth-split auth-split-${side}`}>
       <section className="auth-story">
-        <div className="auth-story-bg" aria-hidden="true">
-          <RailArt />
-        </div>
+        {side === "signin" ? (
+          <div className="auth-story-bg auth-story-photo" aria-hidden="true" />
+        ) : (
+          <div className="auth-story-bg" aria-hidden="true">
+            <RailArt />
+          </div>
+        )}
         <header className="auth-story-top">
           <a className="auth-brand" {...link("/")} aria-label="Handrail home">
             <Logo size={46} className="logo auth-brand-logo" />

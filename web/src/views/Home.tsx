@@ -55,9 +55,7 @@ export function HomePage({ auth, session, onSignedIn }: Props) {
       <SiteNav auth={auth} session={session} demo={demo} signInPath={signInPath} signInLabel={signInLabel} />
 
       <section className="home-hero">
-        <div className="home-hero-bg" aria-hidden="true">
-          <RailArt />
-        </div>
+        <div className="home-hero-bg home-hero-photo" aria-hidden="true" />
         <div className="home-hero-inner">
           <div className="home-hero-copy">
             <p className="eyebrow eyebrow-mint">Safe AI actions for PayPal</p>
