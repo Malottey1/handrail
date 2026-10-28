@@ -52,7 +52,18 @@ if (!READ_ONLY.test(toolName)) {
 console.log(`\nCalling ${toolName} ${JSON.stringify(args)} through Handrail...`);
 const result = await client.callTool({ name: toolName, arguments: args });
 console.log(JSON.stringify(result, null, 2).slice(0, 3000));
-console.log(result.isError ? "\nSMOKE TEST: tool returned an error (see above)" : "\nSMOKE TEST: ok");
+
+// PayPal reports API failures as a normal result whose text is {"ok":false,...}.
+const first = (result.content as Array<{ type: string; text?: string }>)[0];
+let paypalError: string | null = null;
+try {
+  const body = first?.type === "text" ? JSON.parse(first.text ?? "") : null;
+  if (body?.ok === false) paypalError = `${body.code ?? "error"}${body.status ? ` ${body.status}` : ""}: ${body.message ?? ""}`;
+} catch {
+  // not JSON: a plain answer
+}
+const failed = Boolean(result.isError) || paypalError !== null;
+console.log(failed ? `\nSMOKE TEST: PayPal returned an error${paypalError ? ` (${paypalError})` : ""}` : "\nSMOKE TEST: ok");
 
 await client.close();
-process.exit(result.isError ? 1 : 0);
+process.exit(failed ? 1 : 0);
