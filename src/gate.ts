@@ -6,7 +6,7 @@ import type { AgentIdentity } from "./auth/agent-keys.js";
 import type { CallLog } from "./audit.js";
 import { classifyOutcome, operationKey, type Operation, type OperationKey, type OperationStore } from "./idempotency.js";
 import { log } from "./log.js";
-import { DIRECT_TOOLS, NoResponseError, type PayPalDirect } from "./paypal/direct.js";
+import { DIRECT_TOOLS, NoResponseError, REST_READ_TOOLS, type PayPalDirect } from "./paypal/direct.js";
 import type { PayPalRest } from "./paypal/rest.js";
 import { agentKey, evaluate, refundScope } from "./policy/engine.js";
 import { resolveFacts } from "./policy/facts.js";
@@ -37,7 +37,8 @@ const MAX_IN_FLIGHT_WAIT_MS = 90_000;
 export interface GateDeps {
   upstream: Client;
   rest: PayPalRest;
-  direct: Pick<PayPalDirect, "call">;
+  /** read is optional: without it, reads stay with PayPal's MCP server even when it fails. */
+  direct: Pick<PayPalDirect, "call"> & Partial<Pick<PayPalDirect, "read">>;
   callLog: CallLog;
   approvals: ApprovalStore;
   operations: OperationStore;
@@ -291,6 +292,10 @@ export class Gate {
       result = direct
         ? await this.deps.direct.call(tool, args, operation.requestId)
         : ((await this.deps.upstream.callTool({ name: tool, arguments: args })) as CallToolResult);
+      if (!direct && this.deps.direct.read && REST_READ_TOOLS.has(tool) && isSetupError(result)) {
+        log(`${tool}: PayPal's MCP server failed before sending (PAYPAL_API_SETUP_ERROR); answering from the REST API`);
+        result = await this.deps.direct.read(tool, args);
+      }
     } catch (err) {
       threw = true;
       result = unknownOutcomeResult(tool, err as Error, direct);
@@ -457,6 +462,17 @@ function duplicateResult(op: Operation): CallToolResult {
     "It was not sent to PayPal again; this is the original call's result.";
   const original = op.result ?? handrailResult({ status: "in_progress", tool: op.tool }, false, TELL_MODEL.inProgress());
   return { ...original, content: [{ type: "text", text: note }, ...(original.content ?? [])] };
+}
+
+/** PayPal's MCP server failed while building the request, so nothing was sent (paypal/AI-Toolkit issue #34). */
+function isSetupError(result: CallToolResult): boolean {
+  const first = result.content?.[0];
+  if (first?.type !== "text") return false;
+  try {
+    return (JSON.parse(first.text) as { code?: unknown })?.code === "PAYPAL_API_SETUP_ERROR";
+  } catch {
+    return false;
+  }
 }
 
 function unknownOutcomeResult(tool: string, err: Error, direct: boolean): CallToolResult {

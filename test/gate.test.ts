@@ -25,10 +25,13 @@ const POLICY = parsePolicy({
 const PAYPAL_404 = JSON.stringify({ ok: false, status: 404, code: "PAYPAL_API_HTTP_ERROR", message: "The specified resource does not exist." });
 const MINUTE = 60_000;
 
-type PayPalMode = "ok" | "404" | "no_response";
+type PayPalMode = "ok" | "404" | "no_response" | "setup_error";
+
+// What PayPal's sandbox MCP server answers while paypal/AI-Toolkit issue #34 is open.
+const SETUP_ERROR = JSON.stringify({ ok: false, code: "PAYPAL_API_SETUP_ERROR", message: "Unsupported cache mode: default" });
 
 interface SentCall {
-  via: "mcp" | "direct";
+  via: "mcp" | "direct" | "rest";
   name: string;
   arguments?: Record<string, unknown>;
   requestId?: string;
@@ -43,6 +46,7 @@ function setup(opts: { waitMs?: number; ttlMs?: number; captureAmount?: string |
     sent.push(call);
     await new Promise((r) => setTimeout(r, 10));
     if (state.paypal === "no_response") throw new NoResponseError("No response from PayPal: timeout");
+    if (state.paypal === "setup_error" && call.via === "mcp") return { content: [{ type: "text", text: SETUP_ERROR }] };
     return { content: [{ type: "text", text: state.paypal === "404" ? PAYPAL_404 : `paypal:${call.name}` }] };
   }
 
@@ -51,6 +55,7 @@ function setup(opts: { waitMs?: number; ttlMs?: number; captureAmount?: string |
   } as unknown as Client;
   const direct = {
     call: (name: string, args: Record<string, unknown>, requestId: string) => answer({ via: "direct", name, arguments: args, requestId }),
+    read: (name: string, args: Record<string, unknown>) => answer({ via: "rest", name, arguments: args }),
   };
   const rest = {
     async get(path: string) {
@@ -161,6 +166,42 @@ describe("gate: forwarding", () => {
     await gate.handle("list_invoices", {});
     await gate.handle("list_invoices", {});
     assert.equal(sent.length, 2);
+  });
+
+  it("answers a read from the REST API when PayPal's MCP server fails before sending", async () => {
+    const { gate, sent, callLog } = setup({ paypal: "setup_error" });
+    const result = await gate.handle("list_disputes", { dispute_state: "OPEN_INQUIRIES" });
+    assert.deepEqual(
+      sent.map((c) => [c.via, c.name]),
+      [
+        ["mcp", "list_disputes"],
+        ["rest", "list_disputes"],
+      ],
+    );
+    assert.deepEqual(sent[1]!.arguments, { dispute_state: "OPEN_INQUIRIES" });
+    assert.deepEqual(result.content, [{ type: "text", text: "paypal:list_disputes" }]);
+    assert.equal(callLog.recent(1)[0]!.outcome, "succeeded");
+  });
+
+  it("leaves other tools' setup errors with PayPal, recorded as failed: nothing was sent", async () => {
+    const { gate, sent, callLog } = setup({ paypal: "setup_error" });
+    const result = await gate.handle("send_invoice", { invoice_id: "INV2-AAAA" });
+    assert.deepEqual(
+      sent.map((c) => c.via),
+      ["mcp"],
+    );
+    assert.equal(texts(result)[0], SETUP_ERROR);
+    assert.equal(callLog.recent(1)[0]!.outcome, "failed");
+  });
+
+  it("sends dispute concessions directly with a PayPal-Request-Id, never through the MCP server", async () => {
+    const { gate, sent } = setup({ paypal: "setup_error" });
+    const result = await gate.handle("accept_dispute_claim", { dispute_id: "PP-D-1234", note: "Refund agreed" });
+    assert.deepEqual(result.content, [{ type: "text", text: "paypal:accept_dispute_claim" }]);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]!.via, "direct");
+    assert.deepEqual(sent[0]!.arguments, { dispute_id: "PP-D-1234", note: "Refund agreed" });
+    assert.match(sent[0]!.requestId!, /^handrail-[0-9a-f]{40}$/);
   });
 });
 
@@ -434,6 +475,7 @@ describe("idempotency helpers", () => {
     assert.equal(classifyOutcome(body({ ok: false, status: 422 }), false), "failed");
     assert.equal(classifyOutcome(body({ ok: false, status: 503 }), false), "unknown");
     assert.equal(classifyOutcome(body({ ok: false, code: "PAYPAL_API_NO_RESPONSE" }), false), "unknown");
+    assert.equal(classifyOutcome(body({ ok: false, code: "PAYPAL_API_SETUP_ERROR", message: "Unsupported cache mode: default" }), false), "failed");
     assert.equal(classifyOutcome({ content: [], isError: true }, false), "failed");
     assert.equal(classifyOutcome({ content: [] }, true), "unknown");
     assert.equal(classifyOutcome({ content: [{ type: "text", text: "plain" }] }, false), "succeeded");

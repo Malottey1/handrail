@@ -89,6 +89,8 @@ export function classifyOutcome(result: CallToolResult, threw: boolean): Outcome
     try {
       const body = JSON.parse(first.text) as { ok?: unknown; status?: unknown; code?: unknown };
       if (body && typeof body === "object" && body.ok === false) {
+        // The toolkit failed while building the request, before sending it.
+        if (body.code === "PAYPAL_API_SETUP_ERROR") return "failed";
         const status = typeof body.status === "number" ? body.status : null;
         return status !== null && status >= 400 && status < 500 ? "failed" : "unknown";
       }

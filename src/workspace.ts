@@ -42,7 +42,7 @@ export interface WorkspaceOptions {
   audit: AuditChain;
   upstream: Client;
   rest: PayPalRest;
-  direct: Pick<PayPalDirect, "call">;
+  direct: Pick<PayPalDirect, "call"> & Partial<Pick<PayPalDirect, "read">>;
   /** For reviewer briefs. Null when AI features are off. */
   llm: Llm | null;
   policy: Policy;
