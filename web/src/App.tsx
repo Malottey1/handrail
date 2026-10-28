@@ -1,29 +1,56 @@
-import { useCallback, useEffect, useState } from "react";
+import {
+  Activity,
+  BadgeDollarSign,
+  ChevronDown,
+  ChevronRight,
+  CircleUser,
+  Files,
+  House,
+  LogOut,
+  Menu,
+  Moon,
+  ScrollText,
+  Search,
+  Settings,
+  Sun,
+  Users,
+  Webhook,
+  X,
+  type LucideIcon,
+} from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { api, ApiError, can, type AlertChannels, type AuthState, type Session, type Summary, type User, type VerifyResult } from "./api";
-import { Logo, ThemeToggle, usePoll } from "./components";
+import { Logo, PageHeader, usePoll } from "./components";
 import { link, navigate, usePath } from "./router";
+import { setTheme, useTheme } from "./theme";
 import { AccountView } from "./views/Account";
 import { ActivityView } from "./views/Activity";
 import { ApprovalsView } from "./views/Approvals";
 import { AuditView } from "./views/Audit";
 import { LoginPage, SignupPage } from "./views/AuthPages";
+import { DashboardView } from "./views/Dashboard";
 import { HomePage } from "./views/Home";
 import { PolicyView } from "./views/Policy";
 import { SetupView } from "./views/Setup";
 import { TeamView } from "./views/Team";
 import { WebhooksView } from "./views/Webhooks";
 
-const TABS = ["approvals", "activity", "webhooks", "audit", "policy", "setup", "team", "account"] as const;
+const TABS = ["dashboard", "approvals", "activity", "webhooks", "audit", "policy", "setup", "team", "account"] as const;
 type Tab = (typeof TABS)[number];
-const TAB_LABELS: Record<Tab, string> = {
-  approvals: "Approvals",
-  activity: "Activity",
-  webhooks: "Webhooks",
-  audit: "Audit log",
-  policy: "Policy",
-  setup: "Setup",
-  team: "Team & keys",
-  account: "Account",
+const NAV: Record<Tab, { label: string; icon: LucideIcon; subtitle: string }> = {
+  dashboard: { label: "Dashboard", icon: House, subtitle: "" },
+  approvals: { label: "Approvals", icon: BadgeDollarSign, subtitle: "Review and approve money-moving actions from your agents." },
+  activity: { label: "Activity", icon: Activity, subtitle: "Explore every call your agents make through Handrail." },
+  webhooks: { label: "Webhooks", icon: Webhook, subtitle: "Reconcile PayPal events with agent activity and spot anything that bypassed Handrail." },
+  audit: { label: "Audit log", icon: Files, subtitle: "A tamper-evident record of every decision, request and system event." },
+  policy: { label: "Policy", icon: ScrollText, subtitle: "Define the guardrails for what your agents can do with PayPal." },
+  setup: { label: "Setup", icon: Settings, subtitle: "Connect your agent through Handrail, and make sure nothing goes around it." },
+  team: { label: "Team & keys", icon: Users, subtitle: "Manage who has access, what they can do, and the keys your agents use to connect." },
+  account: { label: "Account", icon: CircleUser, subtitle: "Manage your profile, your password and how you're alerted." },
+};
+/** Pages whose list the top bar's search filters. */
+const SEARCH: Partial<Record<Tab, string>> = {
+  approvals: "Search by amount, agent, customer, rule or id…",
 };
 const ROLE_LABELS = { admin: "Admin", approver: "Approver", viewer: "Viewer" } as const;
 
@@ -95,7 +122,7 @@ function Redirect({ to }: { to: string }) {
 /** "#activity" -> the Activity tab; "#approvals/apr_…" -> the Approvals tab, focused on that approval (links in alerts). */
 function tabFromHash(): Tab {
   const t = location.hash.slice(1).split("/")[0] as Tab;
-  return TABS.includes(t) ? t : "approvals";
+  return TABS.includes(t) ? t : "dashboard";
 }
 
 function focusFromHash(): string | null {
@@ -106,14 +133,19 @@ function focusFromHash(): string | null {
 function Dashboard({ session, onSignOut, onUserChange }: { session: Session; onSignOut: () => void; onUserChange: (u: User) => void }) {
   const [tab, setTab] = useState<Tab>(tabFromHash);
   const [focus, setFocus] = useState<string | null>(focusFromHash);
+  const [navOpen, setNavOpen] = useState(false);
+  const [search, setSearch] = useState("");
   useEffect(() => {
     const onHash = () => {
       setTab(tabFromHash());
       setFocus(focusFromHash());
+      setNavOpen(false);
     };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
+  // Each page starts with an empty search.
+  useEffect(() => setSearch(""), [tab]);
 
   const summary = usePoll(() => api<Summary>(session, "/summary"), 3000);
   const verify = usePoll(() => api<VerifyResult>(session, "/audit/verify"), 10000);
@@ -124,78 +156,116 @@ function Dashboard({ session, onSignOut, onUserChange }: { session: Session; onS
     document.title = pending > 0 ? `(${pending}) Handrail` : "Handrail";
   }, [pending]);
 
-  const tabs = TABS.filter((t) => t !== "account" && (t !== "team" || can(session, "admin")));
-  const shown = tab === "team" && !can(session, "admin") ? "approvals" : tab;
+  const tabs = TABS.filter((t) => t !== "team" || can(session, "admin"));
+  const shown = tab === "team" && !can(session, "admin") ? "dashboard" : tab;
+  const page = NAV[shown];
+  const searchHint = SEARCH[shown];
 
   return (
-    <div className="app">
-      <header className="topbar">
-        <a className="brand" {...link("/")} aria-label="Handrail home">
-          <Logo />
-          <span className="brand-name">Handrail</span>
-          <span className="env">Sandbox</span>
-        </a>
-        <IntegrityBadge verify={verify.data} error={verify.error} onClick={() => (location.hash = "audit")} />
-        {s && <AlertsChip alerts={s.alerts} />}
-        <div className="who">
-          <a className={`user-chip ${shown === "account" ? "active" : ""}`} href="#account" title="Your account">
-            <span className="avatar" aria-hidden="true">
-              {initials(session.user.name)}
-            </span>
-            <span className="user-name">{session.user.name}</span>
-            <span className={`role role-${session.user.role}`}>{ROLE_LABELS[session.user.role]}</span>
+    <div className={`shell ${navOpen ? "nav-open" : ""}`}>
+      <aside className="sidebar" aria-label="Handrail">
+        <div className="sidebar-top">
+          <a className="sidebar-brand" {...link("/")} aria-label="Handrail home">
+            <Logo size={38} />
+            <span>Handrail</span>
           </a>
-          <ThemeToggle />
-          <button className="btn btn-ghost" onClick={onSignOut}>
-            Sign out
+          <button className="icon-btn sidebar-close" onClick={() => setNavOpen(false)} aria-label="Close menu">
+            <X size={20} />
           </button>
         </div>
-      </header>
+        <nav className="side-nav">
+          {tabs.map((t) => {
+            const Icon = NAV[t].icon;
+            return (
+              <a key={t} href={`#${t}`} className={`side-link ${shown === t ? "active" : ""}`} aria-current={shown === t ? "page" : undefined}>
+                <Icon size={20} aria-hidden="true" />
+                <span>{NAV[t].label}</span>
+                {t === "approvals" && pending > 0 && (
+                  <span className="side-badge" aria-label={`${pending} waiting`}>
+                    {pending}
+                  </span>
+                )}
+              </a>
+            );
+          })}
+        </nav>
+        <UserMenu session={session} onSignOut={onSignOut} placement="up">
+          {(open, toggle) => (
+            <button className="side-user" onClick={toggle} aria-expanded={open} aria-haspopup="menu">
+              <Avatar name={session.user.name} />
+              <span className="side-user-text">
+                <span className="side-user-name">{session.user.name}</span>
+                <span className="side-user-role">{ROLE_LABELS[session.user.role]}</span>
+              </span>
+              <ChevronRight size={18} aria-hidden="true" />
+            </button>
+          )}
+        </UserMenu>
+      </aside>
+      <div className="sidebar-scrim" onClick={() => setNavOpen(false)} aria-hidden="true" />
 
-      {session.user.isDemo && (
-        <div className="banner banner-demo">
-          You're in your own demo workspace on PayPal's sandbox, signed in as an approver. No real money moves, and nobody else sees
-          what you do here. Start with "Run demo agent" below.
+      <div className="shell-main">
+        <header className="topbar">
+          <button className="icon-btn topbar-menu" onClick={() => setNavOpen(true)} aria-label="Open menu">
+            <Menu size={20} />
+          </button>
+          <span className="env-chip">
+            <span className="env-dot" aria-hidden="true" />
+            Sandbox
+          </span>
+          {searchHint && (
+            <label className="topbar-search">
+              <Search size={17} aria-hidden="true" />
+              <input type="search" placeholder={searchHint} value={search} onChange={(e) => setSearch(e.target.value)} aria-label={searchHint} />
+            </label>
+          )}
+          <div className="topbar-right">
+            {s && <AlertsChip alerts={s.alerts} />}
+            <IntegrityBadge verify={verify.data} error={verify.error} onClick={() => (location.hash = "audit")} />
+            <UserMenu session={session} onSignOut={onSignOut} placement="down">
+              {(open, toggle) => (
+                <button className="topbar-user" onClick={toggle} aria-expanded={open} aria-haspopup="menu" aria-label="Your account">
+                  <Avatar name={session.user.name} />
+                  <ChevronDown size={18} aria-hidden="true" />
+                </button>
+              )}
+            </UserMenu>
+          </div>
+        </header>
+
+        <div className="canvas">
+          {session.user.isDemo && (
+            <div className="banner banner-demo">
+              You're in your own demo workspace on PayPal's sandbox, signed in as an approver. No real money moves, and nobody else sees
+              what you do here. Start with "Run demo agent" on the Approvals page.
+            </div>
+          )}
+          {s && s.unattributed.last30d > 0 && (
+            <a className="banner banner-flag" href="#activity">
+              PayPal reported {s.unattributed.last30d} money-out action{s.unattributed.last30d === 1 ? "" : "s"} in the last 30 days that
+              didn't go through Handrail. Something may be bypassing it. See Activity, and check the Setup tab.
+            </a>
+          )}
+          {summary.error && !(summary.error instanceof ApiError && summary.error.status === 401) && (
+            <div className="banner banner-bad">Can't reach Handrail: {summary.error.message}. Retrying…</div>
+          )}
+
+          <main className="page">
+            {shown !== "dashboard" && shown !== "approvals" && <PageHeader title={page.label} subtitle={page.subtitle} />}
+            {shown === "dashboard" && <DashboardView session={session} summary={s} />}
+            {shown === "approvals" && (
+              <ApprovalsView session={session} onChange={summary.refresh} focus={focus} search={search} title={page.label} subtitle={page.subtitle} />
+            )}
+            {shown === "activity" && <ActivityView session={session} />}
+            {shown === "webhooks" && <WebhooksView session={session} />}
+            {shown === "audit" && <AuditView session={session} verify={verify.data} />}
+            {shown === "policy" && <PolicyView session={session} />}
+            {shown === "setup" && <SetupView session={session} />}
+            {shown === "team" && <TeamView session={session} />}
+            {shown === "account" && <AccountView session={session} onUserChange={onUserChange} />}
+          </main>
         </div>
-      )}
-      {s && s.unattributed.last30d > 0 && (
-        <a className="banner banner-flag" href="#activity">
-          PayPal reported {s.unattributed.last30d} money-out action{s.unattributed.last30d === 1 ? "" : "s"} in the last 30 days that
-          didn't go through Handrail. Something may be bypassing it. See Activity, and check the Setup tab.
-        </a>
-      )}
-      {summary.error && !(summary.error instanceof ApiError && summary.error.status === 401) && (
-        <div className="banner">Can't reach Handrail: {summary.error.message}. Retrying…</div>
-      )}
-
-      <section className="stats" aria-label="Last 24 hours">
-        <Stat label="Waiting for approval" value={pending} tone={pending > 0 ? "warn" : undefined} />
-        <Stat label="Agent calls (24h)" value={s?.last24h.calls} />
-        <Stat label="Sent to PayPal" value={s?.last24h.forwarded} />
-        <Stat label="Blocked" value={s?.last24h.blocked} />
-        <Stat label="Duplicates stopped" value={s?.last24h.duplicates} />
-        <Stat label="Webhook flags" value={s?.webhooks.flagged} tone={s && s.webhooks.flagged > 0 ? "flag" : undefined} />
-      </section>
-
-      <nav className="tabs" role="tablist">
-        {tabs.map((t) => (
-          <a key={t} href={`#${t}`} role="tab" aria-selected={shown === t} className={`tab ${shown === t ? "active" : ""}`}>
-            {TAB_LABELS[t]}
-            {t === "approvals" && pending > 0 && <span className="tab-badge">{pending}</span>}
-          </a>
-        ))}
-      </nav>
-
-      <main className="main">
-        {shown === "approvals" && <ApprovalsView session={session} onChange={summary.refresh} focus={focus} />}
-        {shown === "activity" && <ActivityView session={session} />}
-        {shown === "webhooks" && <WebhooksView session={session} />}
-        {shown === "audit" && <AuditView session={session} verify={verify.data} />}
-        {shown === "policy" && <PolicyView session={session} />}
-        {shown === "setup" && <SetupView session={session} />}
-        {shown === "team" && <TeamView session={session} />}
-        {shown === "account" && <AccountView session={session} onUserChange={onUserChange} />}
-      </main>
+      </div>
     </div>
   );
 }
@@ -208,11 +278,63 @@ const initials = (name: string) =>
     .slice(0, 2)
     .toUpperCase();
 
-function Stat({ label, value, tone }: { label: string; value: number | undefined; tone?: string }) {
+function Avatar({ name }: { name: string }) {
   return (
-    <div className={`stat ${tone ? `stat-${tone}` : ""}`}>
-      <span className="stat-value">{value ?? "–"}</span>
-      <span className="stat-label">{label}</span>
+    <span className="avatar" aria-hidden="true">
+      {initials(name)}
+    </span>
+  );
+}
+
+/** Account, theme and sign-out, from the user card in the sidebar or the avatar in the top bar. */
+function UserMenu({
+  session,
+  onSignOut,
+  placement,
+  children,
+}: {
+  session: Session;
+  onSignOut: () => void;
+  placement: "up" | "down";
+  children: (open: boolean, toggle: () => void) => ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const theme = useTheme();
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && setOpen(false);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  const next = theme === "dark" ? "light" : "dark";
+  return (
+    <div className={`user-menu user-menu-${placement}`} ref={ref}>
+      {children(open, () => setOpen(!open))}
+      {open && (
+        <div className="menu" role="menu">
+          <div className="menu-who">
+            <span className="menu-name">{session.user.name}</span>
+            <span className="menu-email">{session.user.email}</span>
+            <span className={`role role-${session.user.role}`}>{ROLE_LABELS[session.user.role]}</span>
+          </div>
+          <a className="menu-item" role="menuitem" href="#account" onClick={() => setOpen(false)}>
+            <CircleUser size={17} aria-hidden="true" /> Account
+          </a>
+          <button className="menu-item" role="menuitem" onClick={() => setTheme(next)}>
+            {theme === "dark" ? <Sun size={17} aria-hidden="true" /> : <Moon size={17} aria-hidden="true" />}
+            {theme === "dark" ? "Light mode" : "Dark mode"}
+          </button>
+          <button className="menu-item" role="menuitem" onClick={onSignOut}>
+            <LogOut size={17} aria-hidden="true" /> Sign out
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -233,20 +355,23 @@ function AlertsChip({ alerts }: { alerts: AlertChannels }) {
   );
 }
 
+const shortHash = (h: string) => (h.length > 10 ? `${h.slice(0, 4)}…${h.slice(-4)}` : h);
+
 function IntegrityBadge({ verify, error, onClick }: { verify: VerifyResult | null; error: Error | null; onClick: () => void }) {
   if (!verify) {
     return (
       <button className="integrity" onClick={onClick}>
+        <span className="dot" aria-hidden="true" />
         {error ? "Audit log: can't check" : "Checking audit log…"}
       </button>
     );
   }
   return (
     <button className={`integrity ${verify.ok ? "ok" : "bad"}`} onClick={onClick} title={`Head hash ${verify.head}`}>
-      <span className="dot" />
-      {verify.ok ? "Audit log intact" : `Tampering detected (${verify.problems.length})`}
+      <span className="dot" aria-hidden="true" />
+      <span className="integrity-label">{verify.ok ? "Audit log intact" : `Tampering detected (${verify.problems.length})`}</span>
       <span className="integrity-meta">
-        {verify.entries} entries · {verify.head.slice(0, 8)}
+        · {verify.entries.toLocaleString()} entries · {shortHash(verify.head)}
       </span>
     </button>
   );

@@ -1,8 +1,15 @@
-import { useState } from "react";
+import { Check, CirclePlay, TriangleAlert, X } from "lucide-react";
+import { useState, type ReactNode } from "react";
 import { api, ApiError, type DemoStatus, type DemoStepStatus, type Session } from "../api";
 import { usePoll } from "../components";
 
-const STEP_ICON: Record<DemoStepStatus, string> = { waiting: "", running: "", done: "✓", unexpected: "!", failed: "✕" };
+const STEP_ICON: Record<DemoStepStatus, ReactNode> = {
+  waiting: null,
+  running: <span className="spinner" />,
+  done: <Check size={15} strokeWidth={3} />,
+  unexpected: <TriangleAlert size={14} strokeWidth={2.6} />,
+  failed: <X size={15} strokeWidth={3} />,
+};
 
 /**
  * For the demo account: runs a scripted agent through Handrail against
@@ -10,7 +17,7 @@ const STEP_ICON: Record<DemoStepStatus, string> = { waiting: "", running: "", do
  * deduplicated retry and split refunds caught by a running total, without
  * wiring up an agent of their own.
  */
-export function DemoAgentPanel({ session, onActivity }: { session: Session; onActivity: () => void }) {
+export function useDemoAgent(session: Session, onActivity: () => void) {
   const status = usePoll(() => api<DemoStatus>(session, "/demo/run"), 1500);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,31 +41,49 @@ export function DemoAgentPanel({ session, onActivity }: { session: Session; onAc
     }
   }
 
+  const label = running ? "Agent running…" : starting ? "Starting…" : wait > 0 ? `Run again in ${wait}s` : run ? "Run demo agent again" : "Run demo agent";
+  return { status: s, run, running, start, disabled: starting || running || wait > 0, label, error };
+}
+
+export type DemoAgent = ReturnType<typeof useDemoAgent>;
+
+export function DemoRunButton({ demo }: { demo: DemoAgent }) {
+  return (
+    <button className="btn btn-dark btn-lg" onClick={demo.start} disabled={demo.disabled}>
+      <CirclePlay size={19} aria-hidden="true" />
+      {demo.label}
+    </button>
+  );
+}
+
+/** What the demo agent does, each step's result as it runs, and what to do next. */
+export function DemoAgentPanel({ demo }: { demo: DemoAgent }) {
+  const { status: s, run, running } = demo;
   const approval = s?.approval;
   const large = run?.plan.large;
   return (
-    <section className="card demo-agent" aria-live="polite">
-      <div className="demo-agent-head">
+    <section className="demo-panel" aria-live="polite">
+      <div className="demo-panel-head">
+        <span className="demo-panel-icon" aria-hidden="true">
+          <CirclePlay size={20} />
+        </span>
         <div>
-          <h2 className="section-title">Demo agent</h2>
-          <p className="section-help">
-            A scripted support agent connects to Handrail with its own key ("Demo agent") and refunds real sandbox sales: one small
-            refund, one over the policy's limit, a retry of that one, then three small refunds on another sale that together pass the
-            per-payment total. Everything goes through the same gateway a real agent uses.
+          <h2>Demo agent</h2>
+          <p>
+            A scripted support agent connects to Handrail with its own key ("Demo agent") and refunds real sandbox sales: one small refund,
+            one over the policy's limit, a retry of that one, then three small refunds on another sale that together pass the per-payment
+            total. Everything goes through the same gateway a real agent uses.
           </p>
         </div>
-        <button className="btn btn-primary" onClick={start} disabled={starting || running || wait > 0}>
-          {running ? "Agent running…" : starting ? "Starting…" : wait > 0 ? `Run again in ${wait}s` : run ? "Run demo agent again" : "Run demo agent"}
-        </button>
       </div>
-      {error && <p className="error">{error}</p>}
+      {demo.error && <p className="error">{demo.error}</p>}
 
       {run && (
         <ol className="demo-steps">
-          {run.steps.map((step) => (
+          {run.steps.map((step, i) => (
             <li key={step.id} className={`demo-step demo-step-${step.id} demo-step-${step.status}`}>
               <span className="demo-step-icon" aria-hidden="true">
-                {step.status === "running" ? <span className="spinner" /> : STEP_ICON[step.status]}
+                {STEP_ICON[step.status] ?? i + 1}
               </span>
               <div>
                 <p className="demo-step-title">{step.title}</p>
@@ -77,8 +102,8 @@ export function DemoAgentPanel({ session, onActivity }: { session: Session; onAc
       )}
       {run && approval && (approval.status === "executed" || approval.status === "failed") && (
         <p className="notice">
-          {approval.decidedBy} approved the {large} USD refund and Handrail sent it to PayPal once, although the agent asked twice. See
-          the Activity and Audit log tabs for the record.
+          {approval.decidedBy} approved the {large} USD refund and Handrail sent it to PayPal once, although the agent asked twice. See the
+          Activity and Audit log pages for the record.
         </p>
       )}
       {run && approval?.status === "rejected" && (
@@ -86,8 +111,8 @@ export function DemoAgentPanel({ session, onActivity }: { session: Session; onAc
       )}
       {run?.error && <p className="error">The demo agent stopped: {run.error}</p>}
       <p className="fine">
-        This is your own demo workspace: other visitors can't see it, and it's cleared after {s?.resetsAfterMinutes ?? 120} minutes
-        without use. Each run starts fresh, and the agent can run once a minute.
+        This is your own demo workspace: other visitors can't see it, and it's cleared after {s?.resetsAfterMinutes ?? 120} minutes without
+        use. Each run starts fresh, and the agent can run once a minute.
       </p>
     </section>
   );

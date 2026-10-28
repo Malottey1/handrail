@@ -1,4 +1,20 @@
-import { Check, Copy, Eye, EyeOff, Moon, Sun } from "lucide-react";
+import {
+  Ban,
+  Check,
+  CircleDollarSign,
+  Copy,
+  CreditCard,
+  Eye,
+  EyeOff,
+  Gavel,
+  Moon,
+  ReceiptText,
+  Repeat,
+  Sun,
+  Undo2,
+  Webhook,
+  type LucideIcon,
+} from "lucide-react";
 import { useEffect, useRef, useState, type InputHTMLAttributes, type ReactNode } from "react";
 import { setTheme, useTheme } from "./theme";
 
@@ -189,5 +205,52 @@ export function CopyButton({ text, label = "Copy", className = "btn btn-secondar
       {copied ? <Check size={15} aria-hidden="true" /> : <Copy size={15} aria-hidden="true" />}
       <span className="copy-label">{copied ? "Copied" : label}</span>
     </button>
+  );
+}
+
+/** The title row of a dashboard page: heading, one-line description, and actions on the right. */
+export function PageHeader({ title, subtitle, actions }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode }) {
+  return (
+    <header className="page-head">
+      <div>
+        <h1 className="page-title">{title}</h1>
+        {subtitle && <p className="page-subtitle">{subtitle}</p>}
+      </div>
+      {actions && <div className="page-actions">{actions}</div>}
+    </header>
+  );
+}
+
+const TOOL_ICONS: Array<[RegExp, LucideIcon]> = [
+  [/refund/, Undo2],
+  [/dispute/, Gavel],
+  [/^pay_order$|capture|authoriz/, CreditCard],
+  [/subscription/, Repeat],
+  [/invoice/, ReceiptText],
+  [/webhook/, Webhook],
+];
+
+/** A neutral icon for a PayPal action (never PayPal's own logo). */
+export function ToolIcon({ tool, size = 18, tone }: { tool: string; size?: number; tone?: string }) {
+  const Icon = TOOL_ICONS.find(([re]) => re.test(tool))?.[1] ?? CircleDollarSign;
+  return (
+    <span className={`tool-icon ${tone ? `tool-icon-${tone}` : ""}`} aria-hidden="true">
+      <Icon size={size} />
+    </span>
+  );
+}
+
+/** Icon for a blocked call; kept here so the dashboard and activity use the same one. */
+export const BlockedIcon = Ban;
+
+/** Small bars for a trend; decorative, the number beside it carries the meaning. */
+export function Sparkline({ values, tone = "brand" }: { values: number[]; tone?: string }) {
+  const max = Math.max(1, ...values);
+  return (
+    <span className={`sparkline sparkline-${tone}`} aria-hidden="true">
+      {values.map((v, i) => (
+        <span key={i} style={{ height: `${Math.max(8, (v / max) * 100)}%`, opacity: v === 0 ? 0.35 : 1 }} />
+      ))}
+    </span>
   );
 }

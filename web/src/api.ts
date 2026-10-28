@@ -310,3 +310,6 @@ export interface DemoStatus {
   nextRunInSeconds: number;
   resetsAfterMinutes: number;
 }
+
+/** GET /api/stats/activity: hourly counts and money moved, for a window and the one before it. */
+export type { ActivityStats, Bucket as ActivityBucket, Counts as ActivityCounts, MoneyOut } from "../../src/stats.js";

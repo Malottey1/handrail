@@ -11,6 +11,18 @@ export function formatMoney(m: Money | null | undefined): string {
   }
 }
 
+/** Several currencies' totals: the largest first, then "+ 1 more currency". Zero when there's nothing. */
+export function formatMoneyList(list: Money[], zeroCurrency = "USD"): string {
+  if (list.length === 0) return formatMoney({ hundredths: 0, currency: zeroCurrency });
+  const [first, ...rest] = list;
+  return rest.length ? `${formatMoney(first)} + ${rest.length} more ${rest.length === 1 ? "currency" : "currencies"}` : formatMoney(first);
+}
+
+/** The amount in two parts, for large displays: "$250.00" and "USD". */
+export function moneyParts(m: Money): { amount: string; currency: string } {
+  return { amount: formatMoney(m), currency: m.currency };
+}
+
 export function callAmount(row: CallRow): Money | null {
   return row.amount_hundredths !== null && row.currency ? { hundredths: row.amount_hundredths, currency: row.currency } : null;
 }
