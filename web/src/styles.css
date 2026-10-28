@@ -1572,7 +1572,7 @@ a.btn {
   border-radius: var(--radius-pill);
   border: 0;
   background: #fff;
-  color: var(--ink);
+  color: #101614; /* over the photo in both themes, so not var(--ink) */
   text-decoration: none;
   cursor: pointer;
   box-shadow: 0 6px 20px rgb(0 0 0 / 0.18);
