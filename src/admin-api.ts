@@ -190,6 +190,9 @@ type Route = {
 };
 
 /** An ISO time from the query string (also accepts epoch ms), as ISO; 400 if it isn't one. */
+/** A read-only tool with no required arguments, for the Setup page's test call. */
+const SETUP_TEST_TOOL = "list_products";
+
 function timeParam(url: URL, name: string): string | undefined {
   const value = url.searchParams.get(name);
   if (value === null || value === "") return undefined;
@@ -243,7 +246,7 @@ const actorRef = (principal: Principal) => ({ id: principal.user.id, name: princ
  * admin:    POST /api/policy/compile; PUT /api/policy
  *           GET/PATCH /api/users[/:id]; GET/POST/DELETE /api/invites[/:id]
  *           GET/POST/DELETE /api/agent-keys[/:id]
- *           GET/PUT /api/settings/alerts; POST /api/settings/alerts/test; POST /api/setup/:item
+ *           GET/PUT /api/settings/alerts; POST /api/settings/alerts/test; POST /api/setup/test-call; POST /api/setup/:item
  *
  * Every route but the public ones requires a session cookie (plus the CSRF
  * header on changes) or the HANDRAIL_ADMIN_TOKEN bearer token, and its role.
@@ -536,6 +539,26 @@ export function createAdminApi(deps: AdminDeps): (req: IncomingMessage, res: Ser
 
     { method: "GET", path: "setup", role: "viewer", handle: ({ res, ws, principal }) =>
       send(res, 200, setupChecklist(ws, principal.kind === "session" && principal.user.isDemo)) },
+
+    // One read-only call (list one product) through the gate, recorded like any agent call: proves Handrail reaches PayPal.
+    { method: "POST", path: "setup/test-call", role: "admin", handle: async ({ res, principal, ws }) => {
+      const name = `Setup test call (${principal.user.name})`;
+      const started = Date.now();
+      try {
+        await ws.gate.handle(SETUP_TEST_TOOL, { page: 1, page_size: 1 }, { keyId: null, name });
+      } catch (err) {
+        log(`Setup test call failed: ${redact(err instanceof Error ? err.message : String(err))}`);
+      }
+      const call = ws.callLog.recent(20).find((c) => c.agent_name === name && Date.parse(c.created_at) >= started - 1000);
+      send(res, 200, {
+        tool: SETUP_TEST_TOOL,
+        ok: call?.outcome === "succeeded",
+        callId: call?.id ?? null,
+        decision: call?.decision ?? null,
+        outcome: call?.outcome ?? null,
+        durationMs: call?.duration_ms ?? Date.now() - started,
+      });
+    } },
 
     { method: "POST", path: "setup/:item", role: "admin", handle: async ({ req, res, principal, params, now, ws }) => {
       const item = params[0]!;

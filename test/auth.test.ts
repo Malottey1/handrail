@@ -905,3 +905,28 @@ describe("read-only list endpoints: paging, dates and webhook detail", () => {
     assert.equal((await admin.req("GET", "/api/webhooks/WH-NOPE")).status, 404);
   });
 });
+
+describe("setup test call", () => {
+  it("makes one read-only call through the gate for an admin, recorded under their name", async () => {
+    const ctx = await setup();
+    const admin = ctx.browser();
+    await admin.signup("Malcolm Clottey", "malcolm@example.com");
+    const res = await admin.req("POST", "/api/setup/test-call");
+    assert.equal(res.status, 200);
+    assert.equal(res.data.tool, "list_products");
+    assert.equal(res.data.ok, true);
+    assert.equal(res.data.decision, "allow");
+    const calls = (await admin.req("GET", "/api/calls")).data as Array<{ id: number; tool: string; agent_name: string }>;
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]!.id, res.data.callId);
+    assert.equal(calls[0]!.agent_name, "Setup test call (Malcolm Clottey)");
+  });
+
+  it("is admin only", async () => {
+    const ctx = await setup({ demoAccess: true });
+    const judge = ctx.browser();
+    assert.equal((await judge.req("POST", "/api/auth/demo")).status, 200);
+    assert.equal((await judge.req("POST", "/api/setup/test-call")).status, 403);
+    assert.equal((await fetch(`${ctx.base}/api/setup/test-call`, { method: "POST" })).status, 401);
+  });
+});
