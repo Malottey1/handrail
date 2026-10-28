@@ -48,3 +48,6 @@ examples/**/package-lock.json
 # Real-model run reports and logs (scripts/real-model-run.ts)
 real-model-runs/
 .venv-examples/
+
+# Design reference screenshots (local only, never committed)
+handrail-ui-references/
