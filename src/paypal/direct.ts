@@ -52,17 +52,18 @@ export class PayPalDirect {
         const data = await this.post(`/v1/customer/disputes/${encodeURIComponent(String(args.dispute_id))}/accept-claim`, { note: args.note }, requestId);
         return text(data);
       }
-      // The toolkit posts all of send_invoice's and cancel_sent_invoice's arguments as the body.
+      // The toolkit posts all of send_invoice's and cancel_sent_invoice's arguments
+      // as the body, with no Prefer header (so PayPal answers a cancel with 204).
       case "send_invoice": {
-        const { data } = await this.send("POST", `/v2/invoicing/invoices/${encodeURIComponent(String(args.invoice_id))}/send`, args, requestId);
+        const { data } = await this.send("POST", `/v2/invoicing/invoices/${encodeURIComponent(String(args.invoice_id))}/send`, args, requestId, false);
         return text(data);
       }
       case "cancel_sent_invoice": {
-        const { status, data } = await this.send("POST", `/v2/invoicing/invoices/${encodeURIComponent(String(args.invoice_id))}/cancel`, args, requestId);
+        const { status, data } = await this.send("POST", `/v2/invoicing/invoices/${encodeURIComponent(String(args.invoice_id))}/cancel`, args, requestId, false);
         return text(status === 204 ? { success: true, invoice_id: args.invoice_id } : data);
       }
       case "cancel_subscription": {
-        const { data } = await this.send("POST", `/v1/billing/subscriptions/${encodeURIComponent(String(args.subscription_id))}/cancel`, args.payload, requestId);
+        const { data } = await this.send("POST", `/v1/billing/subscriptions/${encodeURIComponent(String(args.subscription_id))}/cancel`, args.payload, requestId, false);
         return text(data);
       }
       default:
@@ -103,15 +104,18 @@ export class PayPalDirect {
     return typeof data === "object" && data !== null ? (data as Record<string, unknown>) : {};
   }
 
-  /** Like request, but keeps the status and an empty body as "" (what the toolkit's axios call returns). */
-  private async send(method: "GET" | "POST", path: string, body?: unknown, requestId?: string): Promise<{ status: number; data: unknown }> {
+  /**
+   * Like request, but keeps the status and an empty body as "" (what the toolkit's
+   * axios call returns). `preferRepresentation` false sends no Prefer header, as the toolkit does.
+   */
+  private async send(method: "GET" | "POST", path: string, body?: unknown, requestId?: string, preferRepresentation = true): Promise<{ status: number; data: unknown }> {
     let res: Response;
     let raw: string;
     try {
       const headers: Record<string, string> = { Authorization: `Bearer ${await this.tokens.getToken()}` };
       if (method === "POST") {
         headers["Content-Type"] = "application/json";
-        headers.Prefer = "return=representation";
+        if (preferRepresentation) headers.Prefer = "return=representation";
         if (requestId) headers["PayPal-Request-Id"] = requestId;
       }
       res = await fetch(`${this.baseUrl}${path}`, {

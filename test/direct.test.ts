@@ -53,6 +53,7 @@ describe("direct REST calls", () => {
     assert.equal(sent[0]!.url, "https://api-m.sandbox.paypal.com/v2/invoicing/invoices/INV2-AAAA/send");
     assert.deepEqual(sent[0]!.body, args);
     assert.equal(sent[0]!.headers["PayPal-Request-Id"], "handrail-send");
+    assert.equal(sent[0]!.headers.Prefer, undefined);
     assert.deepEqual(result.content, [{ type: "text", text: JSON.stringify({ href: "https://www.sandbox.paypal.com/invoice/p/#INV2-AAAA" }) }]);
   });
 
@@ -69,6 +70,7 @@ describe("direct REST calls", () => {
     assert.equal(sent[0]!.url, "https://api-m.sandbox.paypal.com/v2/invoicing/invoices/INV2-AAAA/cancel");
     assert.deepEqual(sent[0]!.body, args);
     assert.equal(sent[0]!.headers["PayPal-Request-Id"], "handrail-cancel");
+    assert.equal(sent[0]!.headers.Prefer, undefined); // the toolkit sends none, so PayPal answers 204
     assert.deepEqual(result.content, [{ type: "text", text: JSON.stringify({ success: true, invoice_id: "INV2-AAAA" }) }]);
   });
 
@@ -78,6 +80,7 @@ describe("direct REST calls", () => {
     assert.equal(sent[0]!.url, "https://api-m.sandbox.paypal.com/v1/billing/subscriptions/I-SUB123/cancel");
     assert.deepEqual(sent[0]!.body, { reason: "Customer asked" });
     assert.equal(sent[0]!.headers["PayPal-Request-Id"], "handrail-sub");
+    assert.equal(sent[0]!.headers.Prefer, undefined);
     assert.deepEqual(result.content, [{ type: "text", text: '""' }]);
   });
 
