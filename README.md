@@ -6,7 +6,10 @@ Built for PayPal's *Build What's Next with PayPal and AI* hackathon. Sandbox onl
 
 ## Try the demo
 
-Open the hosted sandbox deployment (the link is on the Devpost page) and click **Try the demo**, on the homepage or the sign-in page. It signs you in as **Demo Approver**, with the *approver* role, on PayPal's sandbox: you can approve or reject held calls and look at everything, but you can't change the policy, people or keys. No real money moves.
+Open the hosted sandbox deployment (the link is on the Devpost page) and click **Try the demo**, on the homepage or the sign-in page.
+
+> The hosted copy runs on a free server. The first load after a quiet period can take up to a minute while it wakes up. It also resets whenever it restarts (after it sleeps, or on a deploy), so anything left there earlier is gone. Demo sessions don't depend on that: every **Try the demo** starts fresh anyway.
+ It signs you in as **Demo Approver**, with the *approver* role, on PayPal's sandbox: you can approve or reject held calls and look at everything, but you can't change the policy, people or keys. No real money moves.
 
 Then click **Run demo agent** on the Approvals tab. A scripted support agent connects to Handrail's `/mcp` with its own key ("Demo agent"), the same way any agent would, and works on a real sandbox sale:
 
@@ -101,6 +104,8 @@ Open http://127.0.0.1:8787 and click **Set up Handrail**: the first account beco
 | `HANDRAIL_AGENT_TOKEN` | Optional. One extra agent key from `.env`. Normally an admin creates agent keys in the dashboard. |
 | `HANDRAIL_DEMO_ACCESS` | Optional. `true` turns on **Try the demo** and **Run demo agent**, each sign-in in its own workspace. For sandbox demos only. |
 | `HANDRAIL_TRUST_PROXY` | Set to `true` behind a proxy such as Render, so client IPs (for login rate limits) and HTTPS are detected. |
+| `HANDRAIL_HOST` | Optional. The address the server listens on. Defaults to `127.0.0.1`, or `0.0.0.0` on Render. |
+| `HANDRAIL_FREE_PLAN` | Optional. `true` shows "Hosted on a free server. The first load after a quiet period can take up to a minute." on the homepage and sign-in page. |
 | `PAYPAL_WEBHOOK_ID` | Receiving webhooks. Register a URL ending in `/webhooks/paypal`. |
 | `ANTHROPIC_API_KEY` | The AI brief and the plain-English policy. Optional. |
 | `BREVO_API_KEY`, `HANDRAIL_ALERT_FROM` | Email alerts for held calls, via [Brevo](https://www.brevo.com) (free: 300 emails a day). The sender address must be verified in Brevo. Without them, email alerts are off and the dashboard says "Alerts off". |
@@ -385,7 +390,9 @@ Decide held calls in the dashboard, or with `npm run approvals -- approve <id>`.
 
 ## Deploy on Render
 
-Create a **Web Service** from the repository:
+The repository has a `render.yaml` Blueprint for the hosted copy: the free plan, temporary storage (the persistent disk is there but commented out), the build and start commands, and the environment variables. In Render, choose **New → Blueprint**, pick the repository, and enter the values it asks for (`PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, and optionally `PAYPAL_WEBHOOK_ID` and `ANTHROPIC_API_KEY`). Render generates `HANDRAIL_SETUP_TOKEN`; copy it from the service's **Environment** tab when you sign up.
+
+To set the service up by hand instead, create a **Web Service** from the repository:
 
 | Setting | Value |
 | --- | --- |
@@ -396,7 +403,7 @@ Create a **Web Service** from the repository:
 Environment variables:
 
 - **Required:** `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` (sandbox), `HANDRAIL_SETUP_TOKEN` (a long random value: `openssl rand -hex 32`), `HANDRAIL_TRUST_PROXY=true`.
-- **For the public demo:** `HANDRAIL_DEMO_ACCESS=true`.
+- **For the public demo:** `HANDRAIL_DEMO_ACCESS=true`, and `HANDRAIL_FREE_PLAN=true` on the free plan.
 - **Optional:** `ANTHROPIC_API_KEY` (AI briefs and plain-English rules), `BREVO_API_KEY` and `HANDRAIL_ALERT_FROM` (email alerts), `PAYPAL_WEBHOOK_ID` (see below). `HANDRAIL_PUBLIC_URL` defaults to Render's address.
 - **Never set `HANDRAIL_ADMIN_TOKEN` on Render.** Handrail refuses to start if it is set; people sign in with their own accounts.
 
@@ -407,7 +414,7 @@ After the first deploy, open `/signup`, create the admin account and paste the s
 Handrail keeps accounts, the audit log, approvals and webhook events in one SQLite file, and the policy in a JSON file. Pick one:
 
 - **Persistent (a Render disk, paid instances).** Add a disk mounted at, say, `/var/data`, and set `HANDRAIL_DB_PATH=/var/data/handrail.db` and `HANDRAIL_POLICY_PATH=/var/data/policy.json`. On the first boot the policy file doesn't exist yet, so Handrail copies the committed `policy.json` there; after that, policy changes made in the dashboard are kept. A service with a disk runs as a single instance.
-- **Temporary (no disk).** Leave both variables unset. Everything works, but every deploy or restart starts from scratch: accounts, the audit log, approvals and policy changes are gone, and the policy is back to the committed `policy.json`. Sign up again with the setup token after each deploy. That's fine for a judged demo, since each **Try the demo** session gets its own in-memory workspace anyway.
+- **Temporary (no disk; the only option on the free plan).** Leave both variables unset. Everything works, but every deploy or restart starts from scratch: accounts, the audit log, approvals and policy changes are gone, and the policy is back to the committed `policy.json`. On the free plan the service also sleeps after about 15 minutes without traffic, and waking up is a restart. Sign up again with the setup token after each one. That's fine for a judged demo, since each **Try the demo** session gets its own in-memory workspace anyway. What's kept: the environment variables in Render, and the webhook registration in your PayPal app (with `PAYPAL_WEBHOOK_ID`), since the service's URL doesn't change.
 
 Handrail checks which one it's running on (on Render, a file counts as persistent when it's on a different filesystem from the app, which is what a mounted disk is). It logs the answer at startup and shows it on the **Setup** tab under **Storage**: *Persistent*, *Temporary*, or *Partly temporary* if only one of the two files is on the disk.
 

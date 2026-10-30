@@ -1,0 +1,49 @@
+# Render Blueprint for the hosted sandbox copy of Handrail.
+# Free plan, temporary storage: the service sleeps after about 15 minutes without
+# traffic, and every restart (waking up, a deploy) starts from an empty database
+# and the committed policy.json. See "Deploy on Render" in the README.
+services:
+  - type: web
+    name: handrail
+    runtime: node
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: HANDRAIL_TRUST_PROXY
+        value: "true"
+      - key: HANDRAIL_DEMO_ACCESS
+        value: "true"
+      # Shows "Hosted on a free server…" on the homepage and sign-in page.
+      - key: HANDRAIL_FREE_PLAN
+        value: "true"
+      # Needed to create the first admin account. Render generates it; copy it
+      # from the service's Environment tab when you sign up.
+      - key: HANDRAIL_SETUP_TOKEN
+        generateValue: true
+      # Sandbox credentials, entered in the dashboard (never committed).
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      # From the webhook registered in the PayPal sandbox app; set after the first deploy.
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      # Optional: AI briefs and plain-English rules.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # Never add HANDRAIL_ADMIN_TOKEN here: Handrail refuses to start on Render with it.
+
+      # Persistent storage needs a paid plan and a disk. To keep data across
+      # restarts, change the plan, uncomment the disk below and these two variables.
+      # - key: HANDRAIL_DB_PATH
+      #   value: /var/data/handrail.db
+      # - key: HANDRAIL_POLICY_PATH
+      #   value: /var/data/policy.json
+    # disk:
+    #   name: handrail-data
+    #   mountPath: /var/data
+    #   sizeGB: 1
