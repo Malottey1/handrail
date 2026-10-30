@@ -383,7 +383,7 @@ function CallPanel({ call, session, onClose }: { call: CallRow; session: Session
               ["Time", new Date(call.created_at).toLocaleString()],
               ["Outcome", <StatusPill key="o" status={call.outcome} />],
               ["Sent to PayPal", call.forwarded ? "Yes" : "No"],
-              ["Request ID", call.request_id && <span className="mono-text">{call.request_id}</span>],
+              [call.outcome === "duplicate" ? "Original request ID" : "Request ID", call.request_id && <span className="mono-text">{call.request_id}</span>],
               ["Took", call.duration_ms !== null ? `${call.duration_ms} ms` : null],
               ["Amount from", call.amount_source],
             ]}

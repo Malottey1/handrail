@@ -288,6 +288,9 @@ export class Gate {
     const started = performance.now();
     let result: CallToolResult;
     let threw = false;
+    // The PayPal-Request-Id Handrail chose, when the call goes out over REST. MCP
+    // calls carry the toolkit's per-client id, which Handrail never sees.
+    let requestId = direct ? operation.requestId : undefined;
     try {
       result = direct
         ? await this.deps.direct.call(tool, args, operation.requestId)
@@ -298,8 +301,9 @@ export class Gate {
           log(`${tool}: PayPal's MCP server failed before sending (PAYPAL_API_SETUP_ERROR); answering from the REST API`);
           result = await this.deps.direct.read(tool, args);
         } else if (operation && REST_WRITE_FALLBACK_TOOLS.has(tool)) {
-          log(`${tool}: PayPal's MCP server failed before sending (PAYPAL_API_SETUP_ERROR); sending via the REST API (PayPal-Request-Id ${operation.requestId})`);
-          result = await this.deps.direct.call(tool, args, operation.requestId);
+          requestId = operation.requestId;
+          log(`${tool}: PayPal's MCP server failed before sending (PAYPAL_API_SETUP_ERROR); sending via the REST API (PayPal-Request-Id ${requestId})`);
+          result = await this.deps.direct.call(tool, args, requestId);
         }
       }
     } catch (err) {
@@ -311,7 +315,7 @@ export class Gate {
     const durationMs = performance.now() - started;
     const outcome = classifyOutcome(result, threw);
 
-    this.deps.callLog.finish(callId, result, outcome, durationMs, this.now());
+    this.deps.callLog.finish(callId, result, outcome, durationMs, this.now(), requestId);
     if (operation) this.finishOperation(operation, outcome, result);
     log(`${tool} ${direct ? `sent directly (PayPal-Request-Id ${operation!.requestId})` : "forwarded"}: ${outcome} ${Math.round(durationMs)}ms`);
     return result;

@@ -149,18 +149,25 @@ export class CallLog {
     });
   }
 
-  /** Records a repeat of a live operation that was answered without contacting PayPal. */
+  /**
+   * Records a repeat of a live operation that was answered without contacting
+   * PayPal, with the PayPal-Request-Id the original call was sent with (if any).
+   */
   recordDuplicate(tool: string, args: Record<string, unknown>, operationKey: string, now: number, agent: AgentIdentity | null = null): number {
     return this.chain.record(now, () => {
+      const original = this.db
+        .prepare(`SELECT request_id FROM tool_calls WHERE operation_key = ? AND request_id IS NOT NULL ORDER BY id DESC LIMIT 1`)
+        .get(operationKey) as { request_id: string } | undefined;
+      const requestId = original?.request_id ?? null;
       const result = this.db
         .prepare(
           `INSERT INTO tool_calls (created_at, at_ms, tool, args_json, decision, reason, hits_json,
-             amount_source, forwarded, operation_key, outcome, is_error, duration_ms, agent_key_id, agent_name)
-           VALUES (?, ?, ?, ?, 'duplicate', 'Repeat of an earlier identical call; not sent to PayPal again', '[]', 'none', 0, ?, 'duplicate', 0, 0, ?, ?)`,
+             amount_source, forwarded, operation_key, request_id, outcome, is_error, duration_ms, agent_key_id, agent_name)
+           VALUES (?, ?, ?, ?, 'duplicate', 'Repeat of an earlier identical call; not sent to PayPal again', '[]', 'none', 0, ?, ?, 'duplicate', 0, 0, ?, ?)`,
         )
-        .run(new Date(now).toISOString(), now, tool, JSON.stringify(args), operationKey, agent?.keyId ?? null, agent?.name ?? null);
+        .run(new Date(now).toISOString(), now, tool, JSON.stringify(args), operationKey, requestId, agent?.keyId ?? null, agent?.name ?? null);
       const id = Number(result.lastInsertRowid);
-      const data = { tool, args, decision: "duplicate", amount: null, forwarded: false, operationKey, outcome: "duplicate", agent };
+      const data = { tool, args, decision: "duplicate", amount: null, forwarded: false, operationKey, requestId, outcome: "duplicate", agent };
       return { value: id, entries: [{ kind: "call.duplicate" as const, ref: `call:${id}`, data }] };
     });
   }
@@ -169,13 +176,15 @@ export class CallLog {
    * Stores the result. Unknown outcomes are not marked as errors, so they keep
    * counting toward spend limits: the money may have moved.
    */
-  finish(id: number, result: unknown, outcome: CallOutcome, durationMs: number, now = Date.now()): void {
+  finish(id: number, result: unknown, outcome: CallOutcome, durationMs: number, now = Date.now(), requestId?: string): void {
     const isError = outcome === "failed" || outcome === "blocked";
     this.chain.record(now, () => {
+      // requestId: the PayPal-Request-Id the call went out with, when only known
+      // once it was sent (a REST fallback); otherwise the column keeps begin()'s value.
       this.db
-        .prepare(`UPDATE tool_calls SET result_json = ?, is_error = ?, outcome = ?, duration_ms = ? WHERE id = ?`)
-        .run(JSON.stringify(result ?? null), isError ? 1 : 0, outcome, Math.round(durationMs), id);
-      const data = { outcome, result: result ?? null, durationMs: Math.round(durationMs) };
+        .prepare(`UPDATE tool_calls SET result_json = ?, is_error = ?, outcome = ?, duration_ms = ?, request_id = COALESCE(?, request_id) WHERE id = ?`)
+        .run(JSON.stringify(result ?? null), isError ? 1 : 0, outcome, Math.round(durationMs), requestId ?? null, id);
+      const data = { outcome, result: result ?? null, durationMs: Math.round(durationMs), ...(requestId ? { requestId } : {}) };
       return { value: undefined, entries: [{ kind: "call.finished" as const, ref: `call:${id}`, data }] };
     });
   }

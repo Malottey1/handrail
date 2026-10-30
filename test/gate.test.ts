@@ -25,7 +25,8 @@ const POLICY = parsePolicy({
 const PAYPAL_404 = JSON.stringify({ ok: false, status: 404, code: "PAYPAL_API_HTTP_ERROR", message: "The specified resource does not exist." });
 const MINUTE = 60_000;
 
-type PayPalMode = "ok" | "404" | "no_response" | "setup_error";
+// setup_error_no_response: the MCP server fails before sending, then the REST fallback gets no answer.
+type PayPalMode = "ok" | "404" | "no_response" | "setup_error" | "setup_error_no_response";
 
 // What PayPal's sandbox MCP server answers while paypal/AI-Toolkit issue #34 is open.
 const SETUP_ERROR = JSON.stringify({ ok: false, code: "PAYPAL_API_SETUP_ERROR", message: "Unsupported cache mode: default" });
@@ -46,7 +47,8 @@ function setup(opts: { waitMs?: number; ttlMs?: number; captureAmount?: string |
     sent.push(call);
     await new Promise((r) => setTimeout(r, 10));
     if (state.paypal === "no_response") throw new NoResponseError("No response from PayPal: timeout");
-    if (state.paypal === "setup_error" && call.via === "mcp") return { content: [{ type: "text", text: SETUP_ERROR }] };
+    if (state.paypal.startsWith("setup_error") && call.via === "mcp") return { content: [{ type: "text", text: SETUP_ERROR }] };
+    if (state.paypal === "setup_error_no_response") throw new NoResponseError("No response from PayPal: timeout");
     return { content: [{ type: "text", text: state.paypal === "404" ? PAYPAL_404 : `paypal:${call.name}` }] };
   }
 
@@ -425,6 +427,56 @@ describe("gate: idempotency", () => {
     assert.equal(retry.status, "pending_approval");
     assert.match(retry.reason as string, /may already have run/);
     assert.equal(sent.length, 1);
+  });
+
+  it("records the request id a REST fallback write went out with, and reuses it on the retry", async () => {
+    const { gate, sent, callLog, setPayPal } = setup({ paypal: "setup_error_no_response" });
+    const first = await gate.handle("send_invoice", { invoice_id: "INV2-AAAA" });
+    assert.equal(handrailPayload(first).status, "outcome_unknown");
+    const sentWith = sent[1]!.requestId!;
+    assert.match(sentWith, /^handrail-[0-9a-f]{40}$/);
+    assert.equal(callLog.recent(1)[0]!.request_id, sentWith);
+
+    // The retry may duplicate an invoice that was sent, so a human approves it,
+    // and it goes out with the same id for PayPal to de-duplicate.
+    setPayPal("setup_error");
+    const retry = handrailPayload(await gate.handle("send_invoice", { invoice_id: "INV2-AAAA" }));
+    assert.equal(retry.status, "pending_approval");
+    await gate.approve(retry.approval_id as string, "malcolm", null);
+    assert.deepEqual(
+      sent.map((c) => c.via),
+      ["mcp", "direct", "mcp", "direct"],
+    );
+    assert.equal(sent[3]!.requestId, sentWith);
+    const rows = callLog.recent(10).filter((r) => r.forwarded);
+    assert.deepEqual(
+      rows.map((r) => [r.outcome, r.request_id]),
+      [
+        ["succeeded", sentWith],
+        ["unknown", sentWith],
+      ],
+    );
+  });
+
+  it("shows the original request id on a deduplicated retry", async () => {
+    const { gate, sent, callLog } = setup({ paypal: "setup_error" });
+    await gate.handle("cancel_sent_invoice", { invoice_id: "INV2-AAAA" });
+    await gate.handle("cancel_sent_invoice", { invoice_id: "INV2-AAAA" });
+    assert.equal(sent.length, 2); // MCP, then the REST fallback; the retry went nowhere
+    const [retry, original] = callLog.recent(2);
+    assert.equal(retry!.outcome, "duplicate");
+    assert.equal(original!.request_id, sent[1]!.requestId);
+    assert.equal(retry!.request_id, original!.request_id);
+  });
+
+  it("records no request id for calls PayPal's MCP server answered", async () => {
+    const { gate, callLog } = setup();
+    await gate.handle("send_invoice", { invoice_id: "INV2-AAAA" });
+    await gate.handle("send_invoice", { invoice_id: "INV2-AAAA" });
+    assert.deepEqual(
+      callLog.recent(2).map((r) => r.request_id),
+      [null, null],
+    );
   });
 
   it("reuses the pending approval for a repeat of a held call", async () => {
