@@ -416,7 +416,20 @@ Handrail checks which one it's running on (on Render, a file counts as persisten
 - The sandbox MCP server only works over **SSE** at `https://mcp.sandbox.paypal.com/sse`. The documented Streamable HTTP path `/http` returns 404 even with a valid token (`npm run probe` re-checks this).
 - API failures come back as a *successful* tool result whose text is `{"ok":false,"status":404,...}`, so Handrail checks the text to classify them.
 - The toolkit sets `PayPal-Request-Id` once per client, which is why Handrail sends refunds, captures and dispute concessions directly with its own per-operation ID.
-- Since late October 2026 the sandbox MCP server answers every tool call with `PAYPAL_API_SETUP_ERROR` "Unsupported cache mode: default" ([paypal/AI-Toolkit#34](https://github.com/paypal/AI-Toolkit/issues/34)), raised before any request is sent. Handrail records it as failed (nothing happened) and answers the dispute, product and invoice reads from the REST API with the toolkit's own requests; other tools return PayPal's error until it's fixed.
+- Since late October 2026 the sandbox MCP server fails on tool calls; see [Known PayPal issues](#known-paypal-issues).
+
+## Known PayPal issues
+
+### Sandbox MCP server: `PAYPAL_API_SETUP_ERROR` (paypal/AI-Toolkit#34)
+
+- PayPal's sandbox MCP server (`https://mcp.sandbox.paypal.com/sse`) answers tool calls with `{"ok":false,"code":"PAYPAL_API_SETUP_ERROR","message":"Unsupported cache mode: default"}`. It's reported as [paypal/AI-Toolkit#34](https://github.com/paypal/AI-Toolkit/issues/34). PayPal confirmed the regression on Oct 29, 2026 and is working on a fix. Connecting and listing tools still work, and the same access token works against the REST API.
+- The error comes back as a normal tool result with `isError: false`, so a client that only checks `isError` thinks the call succeeded. Handrail reads the result text, recognises the error, and records the call as failed. The toolkit raises it while building the request, so nothing reached PayPal.
+- While it's broken, Handrail serves these tools from PayPal's REST API, with the same requests and result format as the toolkit:
+  - Always sent directly, with a per-operation `PayPal-Request-Id` (not affected): `create_refund`, `pay_order`, `accept_dispute_claim`.
+  - Writes sent via REST with a per-operation `PayPal-Request-Id` when the MCP server returns this error: `send_invoice`, `cancel_sent_invoice`, `cancel_subscription`.
+  - Reads answered from REST when the MCP server returns this error: `list_disputes`, `get_dispute`, `list_products`, `show_product_details`, `list_invoices`, `get_invoice`.
+- The other 34 tools (for example `get_order`, `create_order`, `get_refund`, `list_transactions`, `create_invoice`, `send_invoice_reminder`, subscription plans and shipment tracking) return PayPal's error until PayPal's fix is live.
+- The fallback triggers only on this error code. Every call still goes to PayPal's MCP server first, so calls go back through it automatically once it's fixed, with no change to Handrail.
 
 ## Limits
 
