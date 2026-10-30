@@ -183,9 +183,44 @@ describe("gate: forwarding", () => {
     assert.equal(callLog.recent(1)[0]!.outcome, "succeeded");
   });
 
+  for (const [tool, args] of [
+    ["send_invoice", { invoice_id: "INV2-AAAA", send_to_recipient: true }],
+    ["cancel_sent_invoice", { invoice_id: "INV2-AAAA", note: "Sent in error" }],
+    ["cancel_subscription", { subscription_id: "I-SUB123", payload: { reason: "Customer asked" } }],
+  ] as const) {
+    it(`sends ${tool} via REST with a PayPal-Request-Id when PayPal's MCP server fails before sending`, async () => {
+      const { gate, sent, callLog } = setup({ paypal: "setup_error" });
+      const result = await gate.handle(tool, { ...args });
+      assert.deepEqual(
+        sent.map((c) => [c.via, c.name]),
+        [
+          ["mcp", tool],
+          ["direct", tool],
+        ],
+      );
+      assert.deepEqual(sent[1]!.arguments, args);
+      assert.match(sent[1]!.requestId!, /^handrail-[0-9a-f]{40}$/);
+      assert.deepEqual(result.content, [{ type: "text", text: `paypal:${tool}` }]);
+      assert.equal(callLog.recent(1)[0]!.outcome, "succeeded");
+
+      // A retry is answered from the record: nothing goes to PayPal twice.
+      await gate.handle(tool, { ...args });
+      assert.equal(sent.length, 2);
+    });
+
+    it(`sends ${tool} through PayPal's MCP server when it works`, async () => {
+      const { gate, sent } = setup();
+      await gate.handle(tool, { ...args });
+      assert.deepEqual(
+        sent.map((c) => c.via),
+        ["mcp"],
+      );
+    });
+  }
+
   it("leaves other tools' setup errors with PayPal, recorded as failed: nothing was sent", async () => {
     const { gate, sent, callLog } = setup({ paypal: "setup_error" });
-    const result = await gate.handle("send_invoice", { invoice_id: "INV2-AAAA" });
+    const result = await gate.handle("send_invoice_reminder", { invoice_id: "INV2-AAAA" });
     assert.deepEqual(
       sent.map((c) => c.via),
       ["mcp"],

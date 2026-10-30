@@ -6,7 +6,7 @@ import type { AgentIdentity } from "./auth/agent-keys.js";
 import type { CallLog } from "./audit.js";
 import { classifyOutcome, operationKey, type Operation, type OperationKey, type OperationStore } from "./idempotency.js";
 import { log } from "./log.js";
-import { DIRECT_TOOLS, NoResponseError, REST_READ_TOOLS, type PayPalDirect } from "./paypal/direct.js";
+import { DIRECT_TOOLS, NoResponseError, REST_READ_TOOLS, REST_WRITE_FALLBACK_TOOLS, type PayPalDirect } from "./paypal/direct.js";
 import type { PayPalRest } from "./paypal/rest.js";
 import { agentKey, evaluate, refundScope } from "./policy/engine.js";
 import { resolveFacts } from "./policy/facts.js";
@@ -292,9 +292,15 @@ export class Gate {
       result = direct
         ? await this.deps.direct.call(tool, args, operation.requestId)
         : ((await this.deps.upstream.callTool({ name: tool, arguments: args })) as CallToolResult);
-      if (!direct && this.deps.direct.read && REST_READ_TOOLS.has(tool) && isSetupError(result)) {
-        log(`${tool}: PayPal's MCP server failed before sending (PAYPAL_API_SETUP_ERROR); answering from the REST API`);
-        result = await this.deps.direct.read(tool, args);
+      if (!direct && isSetupError(result)) {
+        // Nothing reached PayPal, so sending the same request over REST can't duplicate it.
+        if (this.deps.direct.read && REST_READ_TOOLS.has(tool)) {
+          log(`${tool}: PayPal's MCP server failed before sending (PAYPAL_API_SETUP_ERROR); answering from the REST API`);
+          result = await this.deps.direct.read(tool, args);
+        } else if (operation && REST_WRITE_FALLBACK_TOOLS.has(tool)) {
+          log(`${tool}: PayPal's MCP server failed before sending (PAYPAL_API_SETUP_ERROR); sending via the REST API (PayPal-Request-Id ${operation.requestId})`);
+          result = await this.deps.direct.call(tool, args, operation.requestId);
+        }
       }
     } catch (err) {
       threw = true;
