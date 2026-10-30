@@ -43,6 +43,8 @@ export interface AdminDeps extends HttpOptions {
   llm: Llm | null;
   /** Offer "Try the demo" (sign in as the demo approver). */
   demoAccess: boolean;
+  /** HANDRAIL_FREE_PLAN: tell visitors the first load after a quiet period can be slow. */
+  freePlan?: boolean;
   /** Per-session demo workspaces and the demo agent. Demo sessions are refused without it. */
   demo?: DemoService | null;
   /** Server-side settings (the Slack webhook for alerts). */
@@ -306,6 +308,7 @@ export function createAdminApi(deps: AdminDeps): (req: IncomingMessage, res: Ser
         setupRequired: deps.accounts.countUsers() === 0,
         setupTokenRequired: deps.accounts.countUsers() === 0 && !!deps.setupToken,
         demoAccess: deps.demoAccess && deps.accounts.demoUser() !== null,
+        freePlan: !!deps.freePlan,
       });
       return true;
     }

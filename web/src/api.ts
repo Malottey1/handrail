@@ -30,6 +30,8 @@ export interface AuthState {
   /** The server has HANDRAIL_SETUP_TOKEN set: the first account needs it. */
   setupTokenRequired?: boolean;
   demoAccess: boolean;
+  /** Hosted on a free server that sleeps when idle (HANDRAIL_FREE_PLAN). */
+  freePlan?: boolean;
 }
 
 const RANK: Record<Role, number> = { viewer: 0, approver: 1, admin: 2 };

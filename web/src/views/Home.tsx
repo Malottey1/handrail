@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { AuthState, Session } from "../api";
-import { CopyButton, Logo, ThemeToggle } from "../components";
+import { ColdStartNote, CopyButton, Logo, ThemeToggle } from "../components";
 import { link } from "../router";
 import { useDemoSignIn } from "./AuthPages";
 
@@ -80,6 +80,7 @@ export function HomePage({ auth, session, onSignedIn }: Props) {
               </p>
             )}
             {auth.demoAccess && !session && <p className="home-hero-fine">The demo signs you in as an approver on PayPal's sandbox. No real money moves.</p>}
+            {auth.freePlan && <ColdStartNote className="cold-start-hero" />}
           </div>
           <HeroCard />
         </div>

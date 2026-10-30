@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+import { listenHost } from "../src/config.js";
 import { loadPolicyFile, seedPolicyFile } from "../src/policy/load.js";
 import { storageStatus } from "../src/storage.js";
 
@@ -58,5 +59,15 @@ describe("storage status", () => {
     // /dev is its own filesystem on macOS and Linux, standing in for the app's directory.
     const s = storageStatus(db, policy, { RENDER_SERVICE_ID: "srv-123" }, "/dev");
     assert.equal(s.mode, "persistent");
+  });
+});
+
+describe("listen address", () => {
+  it("listens on localhost locally, on every interface on Render, and where HANDRAIL_HOST says", () => {
+    assert.equal(listenHost({}), "127.0.0.1");
+    assert.equal(listenHost({ RENDER: "true" }), "0.0.0.0");
+    assert.equal(listenHost({ RENDER_SERVICE_ID: "srv-abc" }), "0.0.0.0");
+    assert.equal(listenHost({ RENDER: "true", HANDRAIL_HOST: "::" }), "::");
+    assert.equal(listenHost({ HANDRAIL_HOST: "0.0.0.0" }), "0.0.0.0");
   });
 });

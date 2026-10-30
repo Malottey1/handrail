@@ -8,7 +8,7 @@ import { AuditChain } from "./audit-chain.js";
 import { AccountStore } from "./auth/accounts.js";
 import { STDIO_AGENT } from "./auth/agent-keys.js";
 import { hashPassword } from "./auth/passwords.js";
-import { loadConfig } from "./config.js";
+import { listenHost, loadConfig } from "./config.js";
 import { createDemoSale } from "./demo/sale.js";
 import { withErrorBoundary } from "./error-boundary.js";
 import { DemoService } from "./demo/workspaces.js";
@@ -101,7 +101,7 @@ async function main(): Promise<void> {
   const { gate, callLog, webhooks, agentKeys } = workspace;
 
   // The demo agent calls Handrail's own /mcp with its key, like any outside agent.
-  const host = process.env.HANDRAIL_HOST || "127.0.0.1";
+  const host = listenHost();
   const loopback = host === "0.0.0.0" || host === "::" ? "127.0.0.1" : host.includes(":") ? `[${host}]` : host;
   const demo = config.demoAccess
     ? new DemoService({
@@ -146,6 +146,7 @@ async function main(): Promise<void> {
     setupToken: config.setupToken,
     storage,
     demoAccess: config.demoAccess,
+    freePlan: config.freePlan,
     trustProxy: config.trustProxy,
     cookieSecure: config.cookieSecure,
   });
@@ -155,7 +156,7 @@ async function main(): Promise<void> {
 
   // The HTTP server always runs. It carries the admin API (approvals), the
   // PayPal webhook endpoint, and the agent-facing /mcp endpoint when not in
-  // stdio mode. Binds to localhost unless HANDRAIL_HOST says otherwise.
+  // stdio mode. Binds to localhost unless HANDRAIL_HOST says otherwise (or on Render).
   const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     const path = new URL(req.url ?? "/", "http://localhost").pathname;
     if (path === "/health") {

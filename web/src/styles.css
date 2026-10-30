@@ -8291,6 +8291,10 @@ a.btn {
 }
 
 @media (min-width: 1024px) and (max-height: 780px) {
+  /* Before the first account the top bar already says "No accounts yet? Set up Handrail". */
+  .auth-split-signin .auth-setup-notice {
+    display: none;
+  }
   .auth-split-signin .auth-notice {
     padding-top: 10px;
     padding-bottom: 10px;
@@ -8359,4 +8363,44 @@ a.btn {
   margin: 0;
   color: var(--ink-2);
   overflow-wrap: anywhere;
+}
+
+/* Hosted copy on a free server (HANDRAIL_FREE_PLAN): a quiet note about slow first loads. */
+.cold-start-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+
+.cold-start-note svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.cold-start-hero,
+.cold-start-on-photo {
+  color: rgb(255 255 255 / 0.66);
+}
+
+.cold-start-hero {
+  margin-top: 10px;
+}
+
+.cold-start-on-photo {
+  text-shadow: 0 1px 3px rgb(0 0 0 / 0.55);
+}
+
+.cold-start-hero svg,
+.cold-start-on-photo svg {
+  color: #8fd9ad;
+}
+
+/* On the sign-in photo, below the points, so the form beside it keeps fitting one screen. */
+.auth-story-note {
+  margin-top: auto;
+  padding-top: 24px;
+  max-width: 460px;
 }

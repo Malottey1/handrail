@@ -2,6 +2,7 @@ import {
   Ban,
   Check,
   CircleDollarSign,
+  Clock,
   Copy,
   CreditCard,
   Eye,
@@ -163,6 +164,16 @@ export function Logo({ size = 28, className = "logo" }: { size?: number; classNa
 }
 
 /** Switches between the light (default) and dark themes. */
+/** On the hosted copy (HANDRAIL_FREE_PLAN): a free server sleeps when idle and takes a while to wake. */
+export function ColdStartNote({ className }: { className: string }) {
+  return (
+    <p className={`cold-start-note ${className}`}>
+      <Clock size={15} aria-hidden="true" />
+      <span>Hosted on a free server. The first load after a quiet period can take up to a minute.</span>
+    </p>
+  );
+}
+
 export function ThemeToggle({ className = "btn btn-ghost theme-toggle" }: { className?: string }) {
   const theme = useTheme();
   const next = theme === "dark" ? "light" : "dark";

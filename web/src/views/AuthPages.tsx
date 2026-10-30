@@ -1,7 +1,7 @@
 import { ArrowRight, CirclePlay, Clock, FileText, KeyRound, Lock, Mail, ShieldCheck, User as UserIcon, UserCheck, type LucideIcon } from "lucide-react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { api, ApiError, type AuthState, type Role, type Session, type User } from "../api";
-import { Logo, PasswordInput, ThemeToggle } from "../components";
+import { ColdStartNote, Logo, PasswordInput, ThemeToggle } from "../components";
 import { link } from "../router";
 import { RailArt } from "./Home";
 
@@ -64,7 +64,7 @@ const SIDES: Record<Side, { tagline: ReactNode; title: ReactNode; body: string; 
 };
 
 /** The split sign-in / sign-up layout: the brand story on the left, the form on the right. */
-function AuthShell({ side, aside, children }: { side: Side; aside: ReactNode; children: ReactNode }) {
+function AuthShell({ side, aside, note, children }: { side: Side; aside: ReactNode; note?: ReactNode; children: ReactNode }) {
   const story = SIDES[side];
   return (
     <div className={`auth-split auth-split-${side}`}>
@@ -101,6 +101,7 @@ function AuthShell({ side, aside, children }: { side: Side; aside: ReactNode; ch
           </ul>
         </div>
         {side === "signup" && <HeldCardArt />}
+        {note && <div className="auth-story-note">{note}</div>}
       </section>
       <section className="auth-pane">
         <header className="auth-pane-top">
@@ -180,6 +181,7 @@ export function LoginPage({ auth, onSignedIn }: { auth: AuthState; onSignedIn: S
   return (
     <AuthShell
       side="signin"
+      note={auth.freePlan && <ColdStartNote className="cold-start-on-photo" />}
       aside={
         auth.setupRequired ? (
           <>
@@ -209,7 +211,7 @@ export function LoginPage({ auth, onSignedIn }: { auth: AuthState; onSignedIn: S
           </span>
         </div>
         {auth.setupRequired && (
-          <p className="notice">
+          <p className="notice auth-setup-notice">
             No accounts yet. <a {...link("/signup")}>Create the admin account</a> to get started.
           </p>
         )}

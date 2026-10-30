@@ -30,6 +30,8 @@ export interface Config {
   aiModel: string;
   /** Offer a "Try the demo" sign-in as a shared approver account (for hackathon judges). */
   demoAccess: boolean;
+  /** Hosted on a plan that sleeps when idle (Render free): the homepage and sign-in say the first load can be slow. */
+  freePlan: boolean;
   /** Behind a proxy (e.g. Render): use X-Forwarded-For / X-Forwarded-Proto for client IP and HTTPS. */
   trustProxy: boolean;
   /** Secure flag on the session cookie. "auto": on unless the dashboard is on localhost over plain HTTP. */
@@ -90,6 +92,14 @@ function cookieSecure(raw: string | undefined): boolean | "auto" {
   throw new Error(`HANDRAIL_COOKIE_SECURE must be true, false or auto, got ${raw}`);
 }
 
+/**
+ * Where the HTTP server listens: HANDRAIL_HOST, else every interface on Render
+ * (its proxy has to reach the port), else localhost only.
+ */
+export function listenHost(env: NodeJS.ProcessEnv = process.env): string {
+  return env.HANDRAIL_HOST?.trim() || (env.RENDER || env.RENDER_SERVICE_ID ? "0.0.0.0" : "127.0.0.1");
+}
+
 export function loadConfig(): Config {
   const paypalBaseUrl = (process.env.PAYPAL_BASE_URL?.trim() || "https://api-m.sandbox.paypal.com").replace(/\/$/, "");
 
@@ -133,6 +143,7 @@ export function loadConfig(): Config {
     anthropicApiKey,
     aiModel: process.env.HANDRAIL_AI_MODEL?.trim() || "claude-opus-5-5",
     demoAccess: process.env.HANDRAIL_DEMO_ACCESS?.trim() === "true",
+    freePlan: process.env.HANDRAIL_FREE_PLAN?.trim() === "true",
     trustProxy: process.env.HANDRAIL_TRUST_PROXY?.trim() === "true",
     cookieSecure: cookieSecure(process.env.HANDRAIL_COOKIE_SECURE?.trim()),
     email,
