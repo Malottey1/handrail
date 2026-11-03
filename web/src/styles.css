@@ -4173,6 +4173,31 @@ a.btn {
   padding-right: 40px;
 }
 
+/* Dashboard tiles are narrow: icon and number share a row, and the words get the full width. */
+.metrics-dash .metric {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  align-content: start;
+  gap: 0 12px;
+}
+
+.metrics-dash .metric-body {
+  display: contents;
+}
+
+.metrics-dash .metric-label,
+.metrics-dash .trend {
+  grid-column: 1 / -1;
+}
+
+.metrics-dash .metric-label {
+  margin-top: 12px;
+}
+
+.metrics-dash .trend {
+  white-space: nowrap;
+}
+
 .trend {
   display: inline-flex;
   align-items: center;

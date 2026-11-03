@@ -71,7 +71,7 @@ export function DashboardView({ session, summary }: { session: Session; summary:
         </a>
       )}
 
-      <section className="metrics" aria-label="Last 24 hours">
+      <section className="metrics metrics-dash" aria-label="Last 24 hours">
         <Metric
           icon={Clock}
           tone="warn"
@@ -84,7 +84,7 @@ export function DashboardView({ session, summary }: { session: Session; summary:
         <Metric icon={Check} tone="good" value={o?.current.forwarded} label="Sent to PayPal" trend={o && trend(o.current.forwarded, o.previous.forwarded, "up-good")} spark={spark("sent")} />
         <Metric icon={X} tone="bad" value={o?.current.blocked} label="Blocked" trend={o && trend(o.current.blocked, o.previous.blocked, "up-bad")} spark={spark("blocked")} />
         <Metric icon={Copy} tone="info" value={o?.current.duplicates} label="Duplicates stopped" trend={o && trend(o.current.duplicates, o.previous.duplicates, "neutral")} spark={spark("duplicates")} />
-        <Metric icon={Webhook} tone="flag" value={summary?.webhooks.flagged} label="Webhook flags" note="Mismatched or unattributed" />
+        <Metric icon={Webhook} tone="flag" value={summary?.webhooks.flagged} label="Webhook flags" note="Mismatch or bypass" noteTitle="Webhooks that disagree with the agent's call, or actions PayPal reports that didn't go through Handrail" />
       </section>
       {overall.error && <p className="error">Couldn't load the last 24 hours: {overall.error.message}</p>}
 
@@ -207,6 +207,7 @@ function Metric({
   label,
   trend: t,
   note,
+  noteTitle,
   spark,
 }: {
   icon: LucideIcon;
@@ -215,6 +216,7 @@ function Metric({
   label: string;
   trend?: Trend | null;
   note?: string;
+  noteTitle?: string;
   spark?: number[];
 }) {
   return (
@@ -225,7 +227,7 @@ function Metric({
       <div className="metric-body">
         <span className="metric-value num">{value ?? "–"}</span>
         <span className="metric-label">{label}</span>
-        {t ? <TrendLine t={t} /> : note ? <span className="trend trend-neutral">{note}</span> : null}
+        {t ? <TrendLine t={t} /> : note ? <span className="trend trend-neutral" title={noteTitle}>{note}</span> : null}
       </div>
       {spark && <Sparkline values={spark} tone={tone} />}
     </div>
