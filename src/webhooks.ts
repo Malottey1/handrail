@@ -48,6 +48,8 @@ interface EventRule {
   resourceId(resource: Record<string, any>): string | null;
   /** Whether this agent call caused the event. */
   matches(resource: Record<string, any>, call: ForwardedCall): boolean;
+  /** Whether PayPal's response names this exact object. Checked across all calls before `matches`. */
+  identifies?(resource: Record<string, any>, call: ForwardedCall): boolean;
   /** The amount PayPal reports, compared with the amount the agent call moved. */
   amount?(resource: Record<string, any>): Money | null;
   /** What it means when no agent call matches. */
@@ -73,8 +75,10 @@ export const EVENT_RULES: Record<string, EventRule> = {
   "PAYMENT.CAPTURE.REFUNDED": {
     tool: "create_refund",
     resourceId: (r) => r.id ?? null,
-    // The refund id from PayPal's response, or the capture the refund points "up" to.
-    matches: (r, call) => call.response?.id === r.id || (!!linkTo(r, "up") && call.args.capture_id === linkTo(r, "up")),
+    identifies: (r, call) => !!r.id && call.response?.id === r.id,
+    // A capture can have many refunds, so its id only stands in for a call with no refund id on record
+    // (still in flight, or outcome unknown). A different refund id means a different refund.
+    matches: (r, call) => !call.response?.id && !!linkTo(r, "up") && call.args.capture_id === linkTo(r, "up"),
     amount: (r) => money(r.amount),
     whenUnmatched: "outside_handrail",
   },
@@ -137,7 +141,8 @@ export function matchEvent(event: WebhookEvent, calls: ForwardedCall[]): MatchRe
   if (!rule) return { status: "ignored", tool: null, callId: null, resourceId: null, reasons: [] };
 
   const resourceId = rule.resourceId(resource);
-  const call = calls.find((c) => c.tool === rule.tool && rule.matches(resource, c));
+  const ofTool = calls.filter((c) => c.tool === rule.tool);
+  const call = ofTool.find((c) => rule.identifies?.(resource, c)) ?? ofTool.find((c) => rule.matches(resource, c));
   if (!call) {
     const status = typeof rule.whenUnmatched === "function" ? rule.whenUnmatched(resource) : rule.whenUnmatched;
     const reasons =

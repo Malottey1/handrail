@@ -44,6 +44,43 @@ describe("matchEvent", () => {
     assert.equal(result.callId, 3);
   });
 
+  it("attributes each refund on a capture to the call that made it", () => {
+    const calls = [
+      call({ id: 2, args: { capture_id: "CAPTURE123" }, response: { id: "REFUND2" }, amount: usd("120.00") }),
+      call({ id: 1, args: { capture_id: "CAPTURE123" }, response: { id: "REFUND1" }, amount: usd("5.00") }),
+    ];
+    // A late webhook for the older refund: not a mismatch against the newer one.
+    const older = matchEvent(refundEvent({ refundId: "REFUND1", value: "5.00" }), calls);
+    assert.deepEqual([older.status, older.callId], ["matched", 1]);
+    const newer = matchEvent(refundEvent({ refundId: "REFUND2", value: "120.00" }), calls);
+    assert.deepEqual([newer.status, newer.callId], ["matched", 2]);
+  });
+
+  it("flags a refund on a capture the agent also refunded, if no call made that refund", () => {
+    const result = matchEvent(refundEvent({ refundId: "BYPASS", value: "5.00" }), [
+      call({ args: { capture_id: "CAPTURE123" }, response: { id: "REFUND1" }, amount: usd("5.00") }),
+    ]);
+    assert.equal(result.status, "outside_handrail");
+    assert.equal(result.callId, null);
+  });
+
+  it("prefers the call with the refund id over a newer call with no recorded refund", () => {
+    const result = matchEvent(refundEvent({ refundId: "REFUND1", value: "5.00" }), [
+      call({ id: 2, args: { capture_id: "CAPTURE123" }, amount: usd("120.00"), outcome: "unknown" }),
+      call({ id: 1, args: { capture_id: "CAPTURE123" }, response: { id: "REFUND1" }, amount: usd("5.00") }),
+    ]);
+    assert.deepEqual([result.status, result.callId], ["matched", 1]);
+  });
+
+  it("matches by capture a call with no refund id on record, flagging an unknown outcome", () => {
+    const pending = matchEvent(refundEvent(), [call({ id: 3, args: { capture_id: "CAPTURE123" }, amount: usd("5.00"), outcome: "unknown" })]);
+    assert.deepEqual([pending.status, pending.callId], ["mismatch", 3]);
+    const failed = matchEvent(refundEvent(), [
+      call({ id: 4, args: { capture_id: "CAPTURE123" }, response: { ok: false, status: 500 }, amount: usd("5.00"), outcome: "failed" }),
+    ]);
+    assert.deepEqual([failed.status, failed.callId], ["mismatch", 4]);
+  });
+
   it("flags a refund amount that differs from what the agent asked for", () => {
     const result = matchEvent(refundEvent({ value: "50.00" }), [call({ response: { id: "REFUND123" }, amount: usd("5.00") })]);
     assert.equal(result.status, "mismatch");
