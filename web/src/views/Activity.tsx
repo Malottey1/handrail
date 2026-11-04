@@ -22,7 +22,8 @@ import {
 } from "../explore";
 import { callAmount, callDecision, countdown, formatMoney, formatTime, parseJson, paypalSummary, toolLabel } from "../format";
 import { useGridTheme } from "../grid";
-import { AgentSays, AiBrief, Verified } from "./Approvals";
+import { AiBrief } from "./AiBrief";
+import { AgentSays, Verified } from "./Approvals";
 
 /**
  * One row in the Activity grid: an agent call through Handrail, or a

@@ -96,7 +96,7 @@ export function DemoAgentPanel({ demo }: { demo: DemoAgent }) {
 
       {run && approval?.status === "pending" && (
         <p className="notice">
-          The {large} USD refund is waiting for you below. Read the AI brief, then approve or reject it.
+          The {large} USD refund is waiting for you below. Check the card, then approve or reject it.
           {running && " The agent is waiting too, and will retry while it does."}
         </p>
       )}

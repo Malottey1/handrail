@@ -172,7 +172,7 @@ export function PolicyView({ session, title, subtitle }: { session: Session; tit
                   <p>
                     {aiOn
                       ? "Describe a rule in plain English. The AI drafts it, Handrail checks it and restates it, and nothing changes until you apply it."
-                      : "Set ANTHROPIC_API_KEY in the server's environment and restart Handrail to draft rules in plain English."}
+                      : "AI drafting is unavailable: ANTHROPIC_API_KEY isn't set on this server. Your rules below are still enforced, because enforcement never uses AI."}
                   </p>
                 </div>
               </header>

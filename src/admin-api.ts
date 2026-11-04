@@ -656,11 +656,18 @@ export function createAdminApi(deps: AdminDeps): (req: IncomingMessage, res: Ser
       send(res, 200, { policy: ws.policy.get(), hash: ws.policy.hash(), ai: { enabled: !!deps.llm, model: deps.llm?.model ?? null } }) },
 
     { method: "POST", path: "policy/compile", role: "admin", handle: async ({ req, res, ws }) => {
-      if (!deps.llm) throw new HttpError(503, "AI features are off: set ANTHROPIC_API_KEY in .env");
+      if (!deps.llm) throw new HttpError(503, "AI drafting is unavailable: ANTHROPIC_API_KEY isn't set on this server. Your policy is unchanged and still enforced.");
       const body = await readBody(req);
       const baseHash = ws.policy.hash();
-      const proposal = await compilePolicy(typeof body.instruction === "string" ? body.instruction : "", ws.policy.get(), deps.llm);
-      send(res, 200, { ...proposal, baseHash, model: deps.llm.model });
+      try {
+        const proposal = await compilePolicy(typeof body.instruction === "string" ? body.instruction : "", ws.policy.get(), deps.llm);
+        send(res, 200, { ...proposal, baseHash, model: deps.llm.model });
+      } catch (err) {
+        if (err instanceof CompileError) throw err;
+        // The model couldn't answer: a rejected key, an outage, a timeout. The detail stays in the server log.
+        log(`AI drafting failed: ${err instanceof Error ? err.message : String(err)}`);
+        throw new HttpError(503, "AI drafting is unavailable right now, so nothing was drafted. Your policy is unchanged and still enforced.");
+      }
     } },
 
     { method: "PUT", path: "policy", role: "admin", handle: async ({ req, res, principal, ws }) => {
@@ -776,7 +783,6 @@ export function createAdminApi(deps: AdminDeps): (req: IncomingMessage, res: Ser
       }
       else if (err instanceof CompileError) send(res, 422, { error: message });
       else if (err instanceof SettingsError) send(res, 400, { error: message });
-      else if (err instanceof Error && err.name.endsWith("APIError")) send(res, 502, { error: `AI request failed: ${message}` });
       else if (err instanceof SyntaxError) send(res, 400, { error: "Body must be JSON" });
       else {
         const errorId = randomBytes(6).toString("hex");

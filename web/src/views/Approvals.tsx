@@ -8,13 +8,13 @@ import {
   Inbox,
   Quote,
   RefreshCw,
-  Sparkles,
   TrendingUp,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, can, type AlertInfo, type Approval, type Money, type Session, type VerifiedFacts } from "../api";
 import { DecisionPill, Empty, JsonBlock, Mono, PageHeader, StatusPill, ToolIcon, useNow, usePoll } from "../components";
 import { countdown, formatMoney, paypalSummary, timeAgo, toolLabel } from "../format";
+import { AiBrief } from "./AiBrief";
 import { DemoAgentPanel, DemoRunButton, useDemoAgent } from "./DemoAgent";
 
 /** The ids worth showing. The agent's free text (notes, reasons) goes under "Agent says". */
@@ -276,69 +276,6 @@ export function ApprovalsView({
         </section>
       </div>
     </div>
-  );
-}
-
-/**
- * The AI-written brief. Shown below the facts, and labelled as advisory: the
- * rules decided to hold the call, and only a person decides.
- */
-export function AiBrief({ approval: a }: { approval: Approval }) {
-  const status = a.explanationStatus;
-  if (!status || status === "unavailable") return null;
-  const e = a.explanation;
-  return (
-    <section className="ai-brief" aria-live="polite">
-      <header className="ai-brief-head">
-        <Sparkles size={20} aria-hidden="true" />
-        <h3>AI brief</h3>
-        <span className="ai-brief-note" title={a.explanationModel ?? undefined}>
-          Advisory only. It can't approve anything.
-        </span>
-      </header>
-      {status === "pending" && (
-        <div className="ai-loading">
-          <span className="shimmer" />
-          <span className="shimmer short" />
-        </div>
-      )}
-      {status === "failed" && <p className="ai-brief-text">Couldn't write a brief this time. The rule above is why it was held.</p>}
-      {status === "ready" && e && (
-        <>
-          <p className="ai-brief-text">{e.summary}</p>
-          <div className="ai-brief-cols">
-            {e.concerns.length > 0 && (
-              <div>
-                <p className="ai-brief-sub ai-brief-sub-warn">Watch-outs</p>
-                <ul>
-                  {e.concerns.map((c, i) => (
-                    <li key={i}>{c}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            <div>
-              <p className="ai-brief-sub">Things to check</p>
-              <ul>
-                {e.checkBeforeApproving.map((c, i) => (
-                  <li key={i}>{c}</li>
-                ))}
-              </ul>
-            </div>
-            {e.context.length > 0 && (
-              <div>
-                <p className="ai-brief-sub">Context</p>
-                <ul>
-                  {e.context.map((c, i) => (
-                    <li key={i}>{c}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-        </>
-      )}
-    </section>
   );
 }
 

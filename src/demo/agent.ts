@@ -98,7 +98,7 @@ export function newDemoRun(plan: DemoPlan, now: number): DemoRun {
     steps: [
       step("sale", `A customer pays ${plan.sale} USD`, "A real sandbox sale for the agent to refund. The shop makes it, not the agent."),
       step("small", `Agent refunds ${plan.small} USD`, `Allowed: under the ${plan.limit} USD limit, so it goes straight to PayPal.`),
-      step("large", `Agent refunds ${plan.large} USD`, `Held: over the ${plan.limit} USD limit, so a person decides. The card gets an AI brief.`),
+      step("large", `Agent refunds ${plan.large} USD`, `Held: over the ${plan.limit} USD limit, so a person decides. With AI on, the card gets a brief.`),
       step("retry", `Agent retries the ${plan.large} USD refund`, "Recognised as the same request: not sent again, and no second approval."),
       plan.split
         ? step(
