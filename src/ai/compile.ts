@@ -3,7 +3,7 @@ import { MONEY_TOOLS, READ_TOOLS, WRITE_TOOLS } from "../policy/classify.js";
 import { DECISION_WORDS, ruleSentence, toolLabel } from "../policy/describe.js";
 import { parsePolicy } from "../policy/load.js";
 import { ruleSchema, type Policy, type Rule } from "../policy/types.js";
-import type { Llm } from "./llm.js";
+import { AI_TIMEOUT_MS, type Llm } from "./llm.js";
 
 /**
  * What the model proposes, after Handrail has validated it. Nothing here takes
@@ -170,6 +170,7 @@ export async function compilePolicy(instruction: string, current: Policy, llm: L
   if (text.length > 1000) throw new CompileError("Keep the instruction under 1,000 characters.");
 
   const request = {
+    signal: AbortSignal.timeout(llm.timeoutMs ?? AI_TIMEOUT_MS),
     system: compileSystemPrompt(current),
     schema: answerJsonSchema(current),
     name: "propose_policy_change",

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createServer, type Server } from "node:http";
+import { createServer, type RequestListener, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { DatabaseSync } from "node:sqlite";
 import { after, describe, it } from "node:test";
@@ -8,7 +8,7 @@ import * as React from "react";
 import { createElement, type ComponentType } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createAdminApi } from "../src/admin-api.js";
-import { AnthropicLlm, type Llm } from "../src/ai/llm.js";
+import { AI_TIMEOUT_MS, AnthropicLlm, type Llm } from "../src/ai/llm.js";
 import type { Approval } from "../src/approvals.js";
 import { AuditChain } from "../src/audit-chain.js";
 import { AccountStore } from "../src/auth/accounts.js";
@@ -30,28 +30,32 @@ const refund = (value: string, key: string) => ({ capture_id: "CAPTURE1", amount
 const servers: Server[] = [];
 after(() => servers.forEach((s) => s.close()));
 
-async function listen(handler: Parameters<typeof createServer>[1]): Promise<string> {
+async function listen(handler: RequestListener): Promise<string> {
   const server = createServer(handler);
   servers.push(server);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 }
 
-/** The real Anthropic SDK, answered the way Anthropic answers a bad key. */
-async function rejectedKeyLlm(): Promise<AnthropicLlm> {
-  const base = await listen((_req, res) => {
-    res.writeHead(401, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ type: "error", error: { type: "authentication_error", message: "invalid x-api-key" } }));
-  });
+/** The real Anthropic SDK, talking to a fake Messages API. */
+async function llmAgainst(handler: RequestListener, timeoutMs?: number): Promise<AnthropicLlm> {
+  const base = await listen(handler);
   const before = process.env.ANTHROPIC_BASE_URL;
   process.env.ANTHROPIC_BASE_URL = base;
   try {
-    return new AnthropicLlm(BAD_KEY, "fake-model");
+    return new AnthropicLlm(BAD_KEY, "fake-model", timeoutMs);
   } finally {
     if (before === undefined) delete process.env.ANTHROPIC_BASE_URL;
     else process.env.ANTHROPIC_BASE_URL = before;
   }
 }
+
+/** Answers the way Anthropic answers a bad key. */
+const rejectedKeyLlm = () =>
+  llmAgainst((_req, res) => {
+    res.writeHead(401, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ type: "error", error: { type: "authentication_error", message: "invalid x-api-key" } }));
+  });
 
 async function setup(llm: Llm | null) {
   const db = new DatabaseSync(":memory:");
@@ -171,6 +175,108 @@ for (const c of CASES) {
     });
   });
 }
+
+describe("when the model is too slow", () => {
+  const CAP_MS = 300;
+  /** Never finishes: `stall` accepts the request and says nothing; `trickle` starts a reply and stops. */
+  const stall: RequestListener = () => {};
+  const trickle: RequestListener = (_req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.write('{"id":"msg_1",');
+  };
+  const counted = (handler: RequestListener) => {
+    const counter = { requests: 0 };
+    const counting: RequestListener = (req, res) => {
+      counter.requests++;
+      handler(req, res);
+    };
+    return { counter, counting };
+  };
+
+  it("caps a task at 20 seconds by default", () => {
+    assert.equal(AI_TIMEOUT_MS, 20_000);
+    assert.equal(new AnthropicLlm(BAD_KEY, "fake-model").timeoutMs, 20_000);
+  });
+
+  for (const [name, handler] of [["never answers", stall], ["stops mid-answer", trickle]] as const) {
+    it(`gives up on a brief when the model ${name}, without affecting the held call`, async () => {
+      const { counter, counting } = counted(handler);
+      const w = await setup(await llmAgainst(counting, CAP_MS));
+
+      const started = Date.now();
+      const id = await w.hold("250.00", "a");
+      assert.ok(Date.now() - started < CAP_MS, "the agent's answer doesn't wait for the brief");
+      assert.equal((await w.call("GET", `/approvals/${id}`)).data.explanationStatus, "pending");
+
+      const a = await w.settled(id);
+      const elapsed = Date.now() - started;
+      assert.equal(a.explanationStatus, "failed");
+      assert.equal(a.status, "pending");
+      assert.ok(elapsed >= CAP_MS - 20 && elapsed < CAP_MS + 700, `gave up after ${elapsed} ms`);
+      assert.equal(counter.requests, 1, "not retried past the cap");
+      assert.deepEqual(w.sent, [], "still held");
+
+      const approved = await w.call("POST", `/approvals/${id}/approve`, {});
+      assert.equal(approved.data.status, "executed");
+      assert.deepEqual(w.sent, ["create_refund"]);
+      assert.equal((await w.call("GET", "/audit/verify")).data.ok, true);
+    });
+
+    it(`says AI drafting is unavailable when the model ${name}`, async () => {
+      const w = await setup(await llmAgainst(handler, CAP_MS));
+      const before = (await w.call("GET", "/policy")).data.hash;
+      const started = Date.now();
+      const draft = await w.call("POST", "/policy/compile", { instruction: "Refunds over $250 need my approval" });
+      const elapsed = Date.now() - started;
+      assert.equal(draft.status, 503);
+      assert.match(draft.data.error, /^AI drafting is unavailable right now/);
+      assert.ok(elapsed < CAP_MS + 700, `gave up after ${elapsed} ms`);
+      assert.equal((await w.call("GET", "/policy")).data.hash, before);
+    });
+  }
+
+  it("lets a person decide while the brief is still being written, and the late failure changes nothing", async () => {
+    const w = await setup(await llmAgainst(stall, CAP_MS));
+    const toApprove = await w.hold("250.00", "a");
+    const toReject = await w.hold("300.00", "b");
+    assert.equal((await w.call("POST", `/approvals/${toApprove}/approve`, {})).data.status, "executed");
+    assert.equal((await w.call("POST", `/approvals/${toReject}/reject`, {})).data.status, "rejected");
+    assert.deepEqual(w.sent, ["create_refund"]);
+
+    assert.equal((await w.settled(toApprove)).status, "executed");
+    assert.equal((await w.settled(toReject)).status, "rejected");
+    assert.deepEqual(w.sent, ["create_refund"]);
+  });
+
+  it("still allows by the rules while the model hangs", async () => {
+    const w = await setup(await llmAgainst(stall, 60_000));
+    const started = Date.now();
+    await w.workspace.gate.handle("create_refund", refund("50.00", "small"));
+    assert.deepEqual(w.sent, ["create_refund"], "under the limit: sent straight away");
+    assert.ok(Date.now() - started < 1_000, "rules never wait for the model");
+  });
+
+  it("shares the cap between a draft and its repair round", async () => {
+    const cap = 1_000;
+    let requests = 0;
+    const llm = await llmAgainst((_req, res) => {
+      if (++requests > 1) return; // The repair request never answers.
+      // A slow first answer that fails validation, using most of the cap.
+      setTimeout(() => {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ id: "msg_1", type: "message", role: "assistant", model: "fake-model", stop_reason: "end_turn", content: [{ type: "text", text: "{}" }] }));
+      }, 800);
+    }, cap);
+    const w = await setup(llm);
+    const started = Date.now();
+    const draft = await w.call("POST", "/policy/compile", { instruction: "Refunds over $250 need my approval" });
+    const elapsed = Date.now() - started;
+    assert.equal(draft.status, 503);
+    assert.equal(requests, 2, "the repair round was tried");
+    // A cap per request would run to about 1,800 ms.
+    assert.ok(elapsed < cap + 400, `gave up after ${elapsed} ms`);
+  });
+});
 
 describe("the approval card without a brief", () => {
   // tsx compiles web/ with classic JSX, which needs React as a global.

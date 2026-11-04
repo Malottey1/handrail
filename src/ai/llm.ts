@@ -8,6 +8,8 @@ import { redact } from "../redact.js";
  */
 export interface Llm {
   readonly model: string;
+  /** Overrides AI_TIMEOUT_MS as the cap on one AI task. */
+  readonly timeoutMs?: number;
   json(request: {
     system: string;
     user: string;
@@ -17,10 +19,13 @@ export interface Llm {
     name: string;
     description: string;
     maxTokens?: number;
+    /** Shared by the requests of one task, so together they stay under the cap. Default: a new cap for this request. */
+    signal?: AbortSignal;
   }): Promise<unknown>;
 }
 
-const TIMEOUT_MS = 45_000;
+/** The longest one AI task (a brief, or a policy draft with its repair round) may take, retries included. */
+export const AI_TIMEOUT_MS = 20_000;
 
 /** Keywords structured outputs may reject. Callers validate with zod afterwards, so dropping them loses nothing. */
 const DROPPED = new Set(["$schema", "minLength", "maxLength", "pattern", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "maxItems"]);
@@ -56,19 +61,23 @@ export class AnthropicLlm implements Llm {
   constructor(
     apiKey: string,
     readonly model: string,
+    readonly timeoutMs: number = AI_TIMEOUT_MS,
   ) {
-    this.client = new Anthropic({ apiKey, timeout: TIMEOUT_MS, maxRetries: 2 });
+    this.client = new Anthropic({ apiKey, timeout: timeoutMs, maxRetries: 2 });
   }
 
   /** Structured outputs: the reply's text is JSON matching the schema. Prompts are redacted before they're sent. */
   async json(request: Parameters<Llm["json"]>[0]): Promise<unknown> {
-    const message = await this.client.messages.create({
-      model: this.model,
-      max_tokens: request.maxTokens ?? 2000,
-      system: redact(`${request.system}\n\nAnswer with the ${request.name} JSON object: ${request.description}`),
-      messages: [{ role: "user", content: redact(request.user) }],
-      output_config: { format: { type: "json_schema", schema: structuredSchema(request.schema) as Record<string, unknown> } },
-    });
+    const message = await this.client.messages.create(
+      {
+        model: this.model,
+        max_tokens: request.maxTokens ?? 2000,
+        system: redact(`${request.system}\n\nAnswer with the ${request.name} JSON object: ${request.description}`),
+        messages: [{ role: "user", content: redact(request.user) }],
+        output_config: { format: { type: "json_schema", schema: structuredSchema(request.schema) as Record<string, unknown> } },
+      },
+      { signal: request.signal ?? AbortSignal.timeout(this.timeoutMs) },
+    );
     const text = message.content
       .filter((block) => block.type === "text")
       .map((block) => block.text)

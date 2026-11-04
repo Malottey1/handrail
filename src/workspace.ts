@@ -1,7 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { Explainer } from "./ai/explain.js";
-import type { Llm } from "./ai/llm.js";
+import { AI_TIMEOUT_MS, type Llm } from "./ai/llm.js";
 import { ApprovalStore, type Approval } from "./approvals.js";
 import type { AuditChain } from "./audit-chain.js";
 import { CallLog } from "./audit.js";
@@ -54,7 +54,7 @@ export interface WorkspaceOptions {
   idempotencyWindowMs: number;
   /** Builds the alert sender: live (email, Slack) for the real workspace, previews for demos. */
   notifier: (alerts: AlertStore) => HeldNotifier;
-  /** How long an alert waits for the AI brief before going out without it. Default 20 s. */
+  /** How long an alert waits for the AI brief before going out without it. Default: just past the AI cap. */
   alertWaitMs?: number;
   now?: () => number;
 }
@@ -82,7 +82,7 @@ export function openWorkspace(opts: WorkspaceOptions): Workspace {
   const explainer = new Explainer(opts.llm, approvals, callLog, () => policy.get(), now);
   const alerts = new AlertStore(db, audit);
   const notifier = opts.notifier(alerts);
-  const alertWaitMs = opts.alertWaitMs ?? 20_000;
+  const alertWaitMs = opts.alertWaitMs ?? AI_TIMEOUT_MS + 2_000;
 
   // After a call is held: write the AI brief, then alert approvers with its
   // one-line summary (or without it, if it takes longer than alertWaitMs).
